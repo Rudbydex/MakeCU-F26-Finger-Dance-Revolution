@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finger Dance Revolution</title>
+  <link rel="preload" as="image" href="assets/octopus-wrong.png">
+  <link rel="preload" as="image" href="assets/octopus-wrong-streak.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="dance.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <p class="eyebrow">Finger rhythm practice</p>
+      <h1>Finger Dance Revolution</h1>
+      <p>Follow the beat and tap the finger that lights up.</p>
+    </header>
+    <div class="stage">
+      <img class="mascot" src="assets/octopus.png" alt="Hand-drawn purple octopus">
+      <section class="game" aria-labelledby="game-title">
+        <div class="game-header">
+          <h2 id="game-title">Rhythm game</h2>
+          <p id="round-label">Slow then fast</p>
+        </div>
+        <div class="game-center">
+          <div class="hand-stage">
+            <img class="hand" data-zone="1" src="assets/left.png" alt="Index finger highlighted" hidden>
+            <img class="hand" data-zone="2" src="assets/down.png" alt="Middle finger highlighted" hidden>
+            <img class="hand" data-zone="3" src="assets/up.png" alt="Ring finger highlighted" hidden>
+            <img class="hand" data-zone="4" src="assets/right.png" alt="Little finger highlighted" hidden>
+            <button id="start" type="button">Start game</button>
+          </div>
+          <p id="cue" aria-live="polite">Ready to play</p>
+          <p id="feedback" aria-live="polite"></p>
+        </div>
+        <div class="zones" role="group" aria-label="Finger controls">
+          <button class="zone" type="button" data-zone="1" data-direction="left" aria-label="Index finger (Left arrow)"><span class="arrow" aria-hidden="true"></span>Index</button>
+          <button class="zone" type="button" data-zone="2" data-direction="down" aria-label="Middle finger (Down arrow)"><span class="arrow" aria-hidden="true"></span>Middle</button>
+          <button class="zone" type="button" data-zone="3" data-direction="up" aria-label="Ring finger (Up arrow)"><span class="arrow" aria-hidden="true"></span>Ring</button>
+          <button class="zone" type="button" data-zone="4" data-direction="right" aria-label="Little finger (Right arrow)"><span class="arrow" aria-hidden="true"></span>Little</button>
+        </div>
+        <div class="game-footer">
+          <p>Score <span id="round-score">0</span></p>
+          <p>Best <span id="best-score">0</span></p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
