@@ -1,5 +1,7 @@
 const zones = [...document.querySelectorAll(".zone")];
 const hands = [...document.querySelectorAll(".hand")];
+const tutorial = document.getElementById("tutorial");
+const speedSelector = document.getElementById("speed");
 const startButton = document.getElementById("start");
 const roundLabel = document.getElementById("round-label");
 const roundScore = document.getElementById("round-score");
@@ -9,6 +11,7 @@ const feedback = document.getElementById("feedback");
 const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
+const tutorialZone = 1;
 const directions = ["Left", "Down", "Up", "Right"];
 const arrowKeys = ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight"];
 const tracks = [
@@ -19,10 +22,13 @@ const maxScore = tracks.reduce((sum, track) => sum + track.beats, 0);
 const bestKey = "finger-dance-two-round-best";
 
 let audio;
+let tutorialComplete = false;
 let activeRound;
 let activeZone = 0;
+let cueSentAt = 0;
 let activeBeat = -1;
 let lastTapId = 0;
+let hardwareStateSeen = false;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
@@ -69,13 +75,18 @@ function showZone(zone) {
   hands.forEach(hand => {
     hand.hidden = Number(hand.dataset.zone) !== zone;
   });
-  post("/api/cue", { zone: zone || null });
+  publishCue();
+}
+
+function publishCue() {
+  cueSentAt = audio.currentTime;
+  post("/api/cue", { zone: activeZone || null });
 }
 
 function showFeedback(message, wrongTap = false) {
   feedback.textContent = message;
   let image = defaultMascot;
-  if (wrongStreak >= 4) image = "assets/octopus-wrong-streak.png";
+  if (!tutorial.hidden || wrongStreak >= 4) image = "assets/octopus-wrong-streak.png";
   else if (wrongTap) image = "assets/octopus-wrong.png";
   if (mascot.getAttribute("src") !== image) mascot.src = image;
 }
@@ -97,11 +108,12 @@ function scoreTap(zone) {
   roundScore.textContent = ++score;
 }
 
-function scheduleTrack(track, start) {
+function scheduleTrack(track, start, speed) {
+  const beatLength = track.beatLength / speed;
   const pattern = makePattern(track.beats);
   pattern.forEach((zone, index) => {
-    const time = start + index * track.beatLength;
-    const duration = track.beatLength * 0.68;
+    const time = start + index * beatLength;
+    const duration = beatLength * 0.68;
     const tone = audio.createOscillator();
     const volume = audio.createGain();
     tone.frequency.value = track.pitches[zone - 1];
@@ -112,7 +124,7 @@ function scheduleTrack(track, start) {
     tone.start(time);
     tone.stop(time + duration);
   });
-  return { ...track, pattern, start, end: start + track.beats * track.beatLength };
+  return { ...track, beatLength, pattern, start, end: start + track.beats * beatLength };
 }
 
 function finishGame() {
@@ -131,6 +143,7 @@ function finishGame() {
   roundLabel.textContent = "Both songs complete";
   cue.textContent = `You hit ${score} of ${maxScore} beats!`;
   showFeedback("");
+  speedSelector.disabled = false;
   startButton.textContent = "Play again";
   startButton.hidden = false;
   startButton.disabled = false;
@@ -138,13 +151,24 @@ function finishGame() {
 }
 
 async function startGame() {
-  if (startButton.disabled) return;
+  if (!tutorial.hidden || startButton.disabled) return;
   startButton.disabled = true;
   try {
     audio ??= new AudioContext();
-    await audio.resume();
-    const slow = scheduleTrack(tracks[0], audio.currentTime + 1);
-    const fast = scheduleTrack(tracks[1], slow.end + 2);
+    if (audio.state !== "running") await audio.resume();
+    if (!tutorialComplete) {
+      tutorial.hidden = false;
+      startButton.hidden = true;
+      roundLabel.textContent = "Tutorial";
+      cue.textContent = "When a finger lights up, touch it to your thumb. Try the green index finger.";
+      showFeedback("");
+      zones[0].focus();
+      return;
+    }
+    const speed = Number(speedSelector.querySelector("input:checked").value);
+    const slow = scheduleTrack(tracks[0], audio.currentTime + 1, speed);
+    const fast = scheduleTrack(tracks[1], slow.end + 2, speed);
+    speedSelector.disabled = true;
 
     score = 0;
     wrongStreak = 0;
@@ -180,18 +204,37 @@ async function startGame() {
         cue.textContent = `Tap ${directions[zone - 1]}!`;
         showZone(zone);
       }
+      // Keep long, slow cues active on the hardware bridge.
+      if (activeZone && time - cueSentAt >= 0.5) publishCue();
       requestAnimationFrame(update);
     }
     requestAnimationFrame(update);
   } catch {
     cue.textContent = "Audio could not start";
+    speedSelector.disabled = false;
     startButton.textContent = "Try again";
+    startButton.hidden = false;
     startButton.disabled = false;
   }
 }
 
+function handleTap(zone) {
+  if (tutorial.hidden) {
+    scoreTap(zone);
+    return;
+  }
+  if (zone !== tutorialZone) {
+    showFeedback("Try the green index finger.");
+    return;
+  }
+  tutorialComplete = true;
+  tutorial.hidden = true;
+  startButton.disabled = false;
+  startGame();
+}
+
 function sendTap(zone) {
-  scoreTap(zone);
+  handleTap(zone);
   post("/api/tap", { zone, source: "browser" });
 }
 
@@ -200,10 +243,15 @@ async function readHardware() {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.ok) {
       const { last_tap: tap } = await response.json();
+      // Ignore a tap left over from before this page opened.
+      if (!hardwareStateSeen) {
+        hardwareStateSeen = true;
+        lastTapId = tap?.id ?? 0;
+      }
       if (!tap || tap.id < lastTapId) lastTapId = 0;
       if (tap && tap.id > lastTapId) {
         lastTapId = tap.id;
-        if (tap.source === "hardware") scoreTap(tap.zone);
+        if (tap.source === "hardware") handleTap(tap.zone);
       }
     }
   } catch {
@@ -216,11 +264,12 @@ async function readHardware() {
 startButton.addEventListener("click", startGame);
 zones.forEach(button => button.addEventListener("click", () => sendTap(Number(button.dataset.zone))));
 window.addEventListener("keydown", event => {
+  if (speedSelector.contains(event.target) || (tutorial.hidden && !startButton.disabled)) return;
   const arrow = arrowKeys.indexOf(event.key);
   if (arrow >= 0) {
-    if (startButton.disabled) event.preventDefault();
-    if (!event.repeat && startButton.disabled) sendTap(arrow + 1);
-  } else if (!event.repeat && /^[1-4]$/.test(event.key) && startButton.disabled) {
+    event.preventDefault();
+    if (!event.repeat) sendTap(arrow + 1);
+  } else if (!event.repeat && /^[1-4]$/.test(event.key)) {
     sendTap(Number(event.key));
   }
 });

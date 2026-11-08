@@ -6,9 +6,13 @@ From this folder, run:
 python3 backend/server.py
 ```
 
-Open http://127.0.0.1:8000 and click **Start game**. Play the 12-beat slow
-song, then the 16-beat fast song. Both use synthesized notes and a newly shuffled
-pattern each run. Click a direction or use the arrow keys or numbers 1-4.
+Open http://127.0.0.1:8000 and click **Start game**. The tutorial shows
+the highlighted index finger and the matching thumb pinch. Select **Index**
+to begin the 12-beat slow song, followed by the 16-beat fast song.
+
+Choose **Relax** (0.5×), **Practise** (0.8×, the default), or **Hard work** (1.3×)
+before the songs start. Both rounds use synthesized notes and a newly shuffled
+pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 
 | Hardware zone | Direction | Finger | Image |
 | --- | --- | --- | --- |

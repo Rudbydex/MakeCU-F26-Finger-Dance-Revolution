@@ -36,10 +36,10 @@ h1 { font-size: min(8cqi, 4.7rem); line-height: 1; margin: .12em 0 .16em; white-
 .mascot { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; object-position: center 42%; mix-blend-mode: multiply; }
 .game {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto;
   gap: 10px;
   aspect-ratio: 1;
-  min-height: 365px;
+  min-height: 430px;
   background: var(--shell);
   border: 2px solid var(--ink);
   padding: clamp(12px, 2.5vw, 23px);
@@ -53,9 +53,48 @@ h1 { font-size: min(8cqi, 4.7rem); line-height: 1; margin: .12em 0 .16em; white-
 }
 .game-header h2 { font-size: clamp(1.1rem, 3vw, 1.65rem); }
 #round-label { background: var(--sand); padding: 4px 8px; font-size: .8rem; }
+.speed { min-width: 0; margin: 0; padding: 3px 0 0; border: 0; }
+.speed legend { padding: 0; font-size: .9rem; }
+.speed-scale {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.speed-scale::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  inset-inline: 16.67%;
+  height: 2px;
+  background: var(--sea-glass);
+}
+.speed-scale label {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  min-height: 44px;
+  text-align: center;
+  font-size: .85rem;
+  cursor: pointer;
+}
+.speed-scale input { width: 16px; height: 16px; margin: 3px 0; accent-color: var(--ink); }
+.speed-scale label:has(input:checked) { text-decoration: underline; text-underline-offset: 3px; }
+.speed:disabled label { cursor: default; }
 .game-center { display: grid; grid-template-rows: 1fr auto auto; min-height: 0; text-align: center; }
 .hand-stage { position: relative; display: grid; place-items: center; min-height: 128px; }
 .hand { position: absolute; inset: 0; margin: auto; height: 100%; max-width: 100%; object-fit: contain; }
+.tutorial-pictures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  padding: 5px 0 10px;
+}
+.tutorial-pictures figure { display: grid; justify-items: center; gap: 5px; margin: 0; }
+.tutorial-pictures img { height: clamp(84px, 16vw, 166px); max-width: 100%; object-fit: contain; }
+.tutorial-pictures figcaption { font-size: .85rem; }
 #cue { font-size: 1.22rem; line-height: 1.1; }
 #feedback { min-height: 1.25em; font-size: .85rem; }
 .game-footer { border-top: 1px solid var(--sea-glass); padding-top: 7px; }

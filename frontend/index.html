@@ -6,8 +6,8 @@
   <title>Finger Dance Revolution</title>
   <link rel="preload" as="image" href="assets/octopus-wrong.png">
   <link rel="preload" as="image" href="assets/octopus-wrong-streak.png">
-  <link rel="stylesheet" href="style.css">
-  <script src="dance.js" defer></script>
+  <link rel="stylesheet" href="style.css?v=speed">
+  <script src="dance.js?v=speed" defer></script>
 </head>
 <body>
   <main>
@@ -21,14 +21,32 @@
       <section class="game" aria-labelledby="game-title">
         <div class="game-header">
           <h2 id="game-title">Rhythm game</h2>
-          <p id="round-label">Slow then fast</p>
+          <p id="round-label">Tutorial up next</p>
         </div>
+        <fieldset id="speed" class="speed">
+          <legend>Speed</legend>
+          <div class="speed-scale">
+            <label><input type="radio" name="speed" value="0.5">Relax</label>
+            <label><input type="radio" name="speed" value="0.8" checked>Practise</label>
+            <label><input type="radio" name="speed" value="1.3">Hard work</label>
+          </div>
+        </fieldset>
         <div class="game-center">
           <div class="hand-stage">
             <img class="hand" data-zone="1" src="assets/left.png" alt="Index finger highlighted" hidden>
             <img class="hand" data-zone="2" src="assets/down.png" alt="Middle finger highlighted" hidden>
             <img class="hand" data-zone="3" src="assets/up.png" alt="Ring finger highlighted" hidden>
             <img class="hand" data-zone="4" src="assets/right.png" alt="Little finger highlighted" hidden>
+            <div id="tutorial" class="tutorial-pictures" hidden>
+              <figure>
+                <img src="assets/left.png" alt="Open hand with the index finger highlighted in green">
+                <figcaption>See the cue</figcaption>
+              </figure>
+              <figure>
+                <img src="assets/tutorial-pinch.png" alt="Green index finger touching the thumb">
+                <figcaption>Touch your thumb</figcaption>
+              </figure>
+            </div>
             <button id="start" type="button">Start game</button>
           </div>
           <p id="cue" aria-live="polite">Ready to play</p>
