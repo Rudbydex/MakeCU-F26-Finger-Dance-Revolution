@@ -46,7 +46,6 @@ const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
 const tutorialZone = 1;
-const placementPrompt = "Try placing the pad of your finger on the center of the thumb sensor.";
 const squeezeRise = 12;
 const squeezeWindowMs = 1000;
 const directions = ["Left", "Down", "Up", "Right"];
@@ -89,7 +88,6 @@ let activeNote = -1;
 let lastTapId = 0;
 let hardwareStateSeen = false;
 let latestHardware;
-let hasSensX25 = false;
 let hardwareReceivedAt = 0;
 let squeezeCapture;
 let score = 0;
@@ -263,33 +261,26 @@ function noteAt(round, time, grace = 0) {
   return -1;
 }
 
-function scoreTap(zone, ageMs, centered) {
+function scoreTap(zone, ageMs) {
   if (!rounds.length) return;
   // Hardware taps arrive a little late, so score them at the time they happened.
   const tapTime = audio.currentTime - ageMs / 1000;
   const round = rounds.find(({ start, end, grace }) => tapTime >= start - grace && tapTime < end);
   if (!round) return;
   const index = noteAt(round, tapTime, round.grace);
-  if (index < 0) {
-    if (centered === false) {
-      showFeedback(placementPrompt);
-      feedbackTimeout = setTimeout(() => showFeedback(""), 1400);
-    }
-    return;
-  }
+  if (index < 0) return;
   const note = round.notes[index];
   const correct = zone === note.zone;
   post("/api/feedback", { zone, correct });
   if (!correct) {
     wrongStreak += 1;
-    const message = centered === false ? `Try the lit finger. ${placementPrompt}` : "Try the lit finger!";
-    showFeedback(message, true);
-    feedbackTimeout = setTimeout(() => showFeedback(""), centered === false ? 1400 : 350);
+    showFeedback("Try the lit finger!", true);
+    feedbackTimeout = setTimeout(() => showFeedback(""), 350);
     return;
   }
   wrongStreak = 0;
-  showFeedback(centered === false ? `On beat! ${placementPrompt}` : "On beat!");
-  feedbackTimeout = setTimeout(() => showFeedback(""), centered === false ? 1400 : 350);
+  showFeedback("On beat!");
+  feedbackTimeout = setTimeout(() => showFeedback(""), 350);
   if (round.hitNotes.has(index)) return;
   round.hitNotes.add(index);
   roundScore.textContent = ++score;
@@ -622,22 +613,16 @@ async function startGame() {
   }
 }
 
-function handleTap(zone, ageMs = 0, centered) {
+function handleTap(zone, ageMs = 0) {
   if (game.hidden) return;
   if (tutorial.hidden) {
-    scoreTap(zone, ageMs, centered);
+    scoreTap(zone, ageMs);
     return;
   }
-  if (hasSensX25 && centered === undefined) {
-    showFeedback("Use the glove to touch the thumb sensor with your index finger.");
-    return;
-  }
-  const correctFinger = zone === tutorialZone;
-  const correct = correctFinger && centered !== false;
+  const correct = zone === tutorialZone;
   post("/api/feedback", { zone, correct });
   if (!correct) {
-    const message = correctFinger ? `${placementPrompt} Release and try again.` : "Try the green index finger.";
-    showFeedback(message);
+    showFeedback("Try the green index finger.");
     return;
   }
   tutorialComplete = true;
@@ -664,7 +649,6 @@ function showHardwareStatus(hardware, samples = []) {
   sensorConnection.dataset.connected = connected;
   sensorReading.hidden = !connected;
   if (connected) {
-    hasSensX25 = hardware.thumb_sensor === "sensx25";
     const contact = hardware.zone ? zones[hardware.zone - 1].textContent.trim() : "No pinch";
     sensorReading.textContent = `Thumb pressure ${hardware.fsr} / ${contact}`;
   }
@@ -684,7 +668,7 @@ async function readHardware() {
       if (!tap || tap.id < lastTapId) lastTapId = 0;
       const pendingTaps = taps ?? (tap?.source === "hardware" ? [tap] : []);
       for (const pendingTap of pendingTaps) {
-        if (pendingTap.id > lastTapId) handleTap(pendingTap.zone, pendingTap.age_ms, pendingTap.centered);
+        if (pendingTap.id > lastTapId) handleTap(pendingTap.zone, pendingTap.age_ms);
       }
       lastTapId = tap?.id ?? 0;
     } else {
