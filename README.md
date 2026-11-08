@@ -1,5 +1,14 @@
 # MakeCU-F26-Finger-Dance-Revolution
 
+```
+docker run --rm --platform linux/amd64 -p 8080:80 chrisdonahue/ddc:latest
+```
+
+```
+python3 backend/chart_songs.py
+python3 backend/server.py
+```
+
 From this folder, run:
 
 ```sh
@@ -28,6 +37,51 @@ pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 - `frontend/` contains the plain HTML, CSS, JavaScript, octopus and hand artwork.
 - `backend/` serves the page and exchanges JSON with a hardware bridge.
   The server uses Python's standard library. The serial bridge uses pySerial.
+
+## Songs
+
+Click **Choose a song** to open the songs page. It lists the built-in warm-up
+songs, the starter songs, and the songs you add. To add a starter song, put an
+audio file (MP3, OGG, WAV, FLAC, or M4A) in `frontend/songs/`. The file name is
+used as the title. Upload a song from the page to save it in
+`frontend/songs/uploads/`, which is git-ignored.
+
+Steps come from [Dance Dance Convolution](https://github.com/chrisdonahue/ddc)
+(DDC). DDC produces a StepMania `.sm` chart. The game turns that chart into
+finger pinches:
+
+- StepMania columns left, down, up, and right map to fingers 1–4.
+- A jump becomes a single finger.
+- A hold or roll becomes a single tap.
+- Mines are ignored.
+- Notes are spaced so each pinch has time to happen.
+
+The speed setting picks the DDC difficulty:
+
+| Speed | DDC difficulty | Minimum gap between pinches |
+| --- | --- | --- |
+| Relax | Easy | 0.6 s |
+| Practise | Medium | 0.42 s |
+| Hard work | Hard | 0.3 s |
+
+Charts are cached in a `charts/` folder next to each audio file. A cached chart
+skips DDC the next time.
+
+DDC needs Python 2 and TensorFlow 0.12, so run its official Docker image
+alongside the game. On Apple Silicon, add `--platform linux/amd64`. The image
+then runs emulated, and charting a song can take a few minutes.
+
+```sh
+docker run --rm -p 8080:80 chrisdonahue/ddc:latest
+python3 backend/server.py                 # uses DDC at http://127.0.0.1:8080
+python3 backend/server.py --ddc-url http://other-host:8080   # or set DDC_URL
+```
+
+To pre-chart the starter songs so the demo does not need DDC running, run:
+
+```sh
+python3 backend/chart_songs.py            # Easy, Medium, and Hard for every starter
+```
 
 ## Connecting hardware
 

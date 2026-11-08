@@ -6,8 +6,8 @@
   <title>Finger Dance Revolution</title>
   <link rel="preload" as="image" href="assets/octopus-wrong.png">
   <link rel="preload" as="image" href="assets/octopus-wrong-streak.png">
-  <link rel="stylesheet" href="style.css?v=green-strength-bars">
-  <script src="dance.js?v=dynamic-squeeze" defer></script>
+  <link rel="stylesheet" href="style.css?v=stop-button">
+  <script src="dance.js?v=warm-up-label" defer></script>
 </head>
 <body>
   <main>
@@ -20,11 +20,13 @@
       <div class="mascot-area">
         <img class="mascot" src="assets/octopus.png" alt="Hand-drawn purple octopus">
         <button id="open-strength" type="button" aria-controls="strength-record">See your strength record!</button>
+        <button id="open-songs" type="button" aria-controls="song-library">Choose a song</button>
       </div>
       <section id="game" class="game" aria-labelledby="game-title">
         <div class="game-header">
           <h2 id="game-title">Rhythm game</h2>
           <p id="round-label">Tutorial up next</p>
+          <p id="selected-song" class="selected-song">Song: Warm-Up</p>
           <div class="sensor-status">
             <p id="sensor-connection" role="status">Waiting for sensor</p>
             <p id="sensor-reading" hidden></p>
@@ -69,6 +71,7 @@
               </div>
             </section>
             <button id="start" type="button">Start game</button>
+            <button id="stop" type="button" hidden>Stop</button>
           </div>
           <p id="cue" aria-live="polite">Ready to play</p>
           <p id="feedback" aria-live="polite"></p>
@@ -83,6 +86,24 @@
           <p>Score <span id="round-score">0</span></p>
           <p>Best <span id="best-score">0</span></p>
         </div>
+      </section>
+      <section id="song-library" class="song-library" aria-labelledby="songs-title" hidden>
+        <h2 id="songs-title" tabindex="-1">Songs</h2>
+        <p>Pick a song to play. New songs get finger steps from the Dance Dance Convolution step generator.
+          Your speed choice sets the step difficulty.</p>
+        <h3>Starter songs</h3>
+        <ul id="starter-songs" class="song-list"></ul>
+        <h3>Your songs</h3>
+        <ul id="uploaded-songs" class="song-list"></ul>
+        <form id="upload-song" class="upload-song">
+          <h3>Add a song</h3>
+          <label>Audio file <input id="song-file" name="file" type="file" accept=".mp3,.ogg,.wav,.flac,.m4a,audio/*" required></label>
+          <label>Title <input id="song-title-input" name="title" type="text" maxlength="120" placeholder="From the file name"></label>
+          <label>Artist <input id="song-artist-input" name="artist" type="text" maxlength="120" placeholder="Optional"></label>
+          <button id="upload-button" type="submit">Upload and make steps</button>
+        </form>
+        <p id="song-status" class="song-status" role="status"></p>
+        <button id="songs-return" type="button">Return to game</button>
       </section>
       <section id="strength-record" class="strength-record" aria-labelledby="strength-title" hidden>
         <h2 id="strength-title" tabindex="-1">Grip strength record</h2>

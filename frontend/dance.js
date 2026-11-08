@@ -21,6 +21,7 @@ const squeezeStatus = document.getElementById("squeeze-status");
 const tutorial = document.getElementById("tutorial");
 const speedSelector = document.getElementById("speed");
 const startButton = document.getElementById("start");
+const stopButton = document.getElementById("stop");
 const roundLabel = document.getElementById("round-label");
 const roundScore = document.getElementById("round-score");
 const bestScore = document.getElementById("best-score");
@@ -28,6 +29,15 @@ const cue = document.getElementById("cue");
 const feedback = document.getElementById("feedback");
 const sensorConnection = document.getElementById("sensor-connection");
 const sensorReading = document.getElementById("sensor-reading");
+const openSongs = document.getElementById("open-songs");
+const songLibrary = document.getElementById("song-library");
+const songsReturn = document.getElementById("songs-return");
+const starterSongs = document.getElementById("starter-songs");
+const uploadedSongs = document.getElementById("uploaded-songs");
+const uploadForm = document.getElementById("upload-song");
+const uploadButton = document.getElementById("upload-button");
+const songStatus = document.getElementById("song-status");
+const selectedSongLabel = document.getElementById("selected-song");
 const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
@@ -38,8 +48,11 @@ const tracks = [
   { name: "Slow song", beatLength: 0.72, beats: 12, pitches: [261.63, 329.63, 392, 440] },
   { name: "Fast song", beatLength: 0.4, beats: 16, pitches: [392, 493.88, 587.33, 659.25] },
 ];
-const maxScore = tracks.reduce((sum, track) => sum + track.beats, 0);
-const bestKey = "finger-dance-two-round-best";
+const warmupBestKey = "finger-dance-two-round-best";
+const starterSlots = 3;
+// Each speed asks DDC for a matching difficulty when playing a real song.
+const songDifficulty = { "0.5": "Easy", "0.8": "Medium", "1.3": "Hard" };
+const songGrace = 0.12;
 const strengthKey = "finger-dance-squeeze-";
 const demoStrengths = Array.from(exampleStrengths, () => 50 + Math.floor(Math.random() * 101));
 const formatStrength = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
@@ -47,10 +60,15 @@ const formatStrength = new Intl.NumberFormat(undefined, { maximumFractionDigits:
 let audio;
 let tutorialComplete = false;
 let selectedHand;
+let selectedSong = null;
+let liveSources = [];
+let stopRequested = false;
+let loadingSong = false;
+let playToken = 0;
 let activeRound;
 let activeZone = 0;
 let cueSentAt = 0;
-let activeBeat = -1;
+let activeNote = -1;
 let lastTapId = 0;
 let hardwareStateSeen = false;
 let latestHardware;
@@ -59,15 +77,29 @@ let squeezeCapture;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
-const hitBeats = new Set();
+const hitNotes = new Set();
+const preparedSongs = new Map();
 
-try {
-  const saved = Number(localStorage.getItem(bestKey));
-  if (Number.isInteger(saved) && saved >= 0 && saved <= maxScore) best = saved;
-} catch {
-  // Scores still work for the current page when local storage is unavailable.
+function bestKey() {
+  return selectedSong ? `finger-dance-best:${selectedSong.id}:${currentDifficulty()}` : warmupBestKey;
 }
-bestScore.textContent = best;
+
+function loadBest() {
+  best = 0;
+  try {
+    const saved = Number(localStorage.getItem(bestKey()));
+    if (Number.isInteger(saved) && saved >= 0) best = saved;
+  } catch {
+    // Scores still work for the current page when local storage is unavailable.
+  }
+  bestScore.textContent = best;
+}
+loadBest();
+
+function setMenusDisabled(disabled) {
+  openStrength.disabled = disabled;
+  openSongs.disabled = disabled;
+}
 
 function latestSqueeze() {
   try {
@@ -106,6 +138,7 @@ openStrength.addEventListener("click", () => {
     ? `${formatStrength.format(reference)} counts (${readingType}, ${record.hand} hand)`
     : "No squeeze recorded yet";
   game.hidden = true;
+  songLibrary.hidden = true;
   strengthRecord.hidden = false;
   document.getElementById("strength-title").focus();
 });
@@ -165,20 +198,28 @@ function showFeedback(message, wrongTap = false) {
   if (mascot.getAttribute("src") !== image) mascot.src = image;
 }
 
+// The note playing at this time. Taps pass a grace period so a slightly early tap counts.
+function noteAt(round, time, grace = 0) {
+  for (let index = round.notes.length - 1; index >= 0; index--) {
+    const note = round.notes[index];
+    if (note.time - grace <= time) return time < note.end ? index : -1;
+  }
+  return -1;
+}
+
 function scoreTap(zone) {
   if (!activeRound) return;
-  const beat = Math.floor((audio.currentTime - activeRound.start) / activeRound.beatLength);
-  const expectedZone = activeRound.pattern[beat];
-  if (expectedZone === undefined) return;
-  if (zone !== expectedZone) {
+  const index = noteAt(activeRound, audio.currentTime, activeRound.grace);
+  if (index < 0) return;
+  if (zone !== activeRound.notes[index].zone) {
     wrongStreak += 1;
     showFeedback("Try the lit finger!", true);
     return;
   }
   wrongStreak = 0;
   showFeedback("On beat!");
-  if (hitBeats.has(beat)) return;
-  hitBeats.add(beat);
+  if (hitNotes.has(index)) return;
+  hitNotes.add(index);
   roundScore.textContent = ++score;
 }
 
@@ -197,38 +238,91 @@ function scheduleTrack(track, start, speed) {
     tone.connect(volume).connect(audio.destination);
     tone.start(time);
     tone.stop(time + duration);
+    liveSources.push(tone);
   });
-  return { ...track, beatLength, pattern, start, end: start + track.beats * beatLength };
+  const notes = pattern.map((zone, index) => ({
+    zone,
+    time: start + index * beatLength,
+    end: start + (index + 1) * beatLength,
+  }));
+  return { name: track.name, notes, grace: 0, end: start + track.beats * beatLength };
 }
 
-function finishGame() {
+function currentDifficulty() {
+  return songDifficulty[speedSelector.querySelector("input:checked").value] ?? "Medium";
+}
+
+async function prepareSong(song, difficulty) {
+  const key = `${song.id}|${difficulty}`;
+  if (!preparedSongs.has(key)) {
+    const loading = (async () => {
+      audio ??= new AudioContext();
+      const [chartResponse, audioResponse] = await Promise.all([
+        fetch(`/api/chart?${new URLSearchParams({ id: song.id, difficulty })}`, { cache: "no-store" }),
+        fetch(song.audio_url),
+      ]);
+      const chart = await chartResponse.json().catch(() => ({}));
+      if (!chartResponse.ok) throw new Error(chart.error ?? "Could not make steps for this song");
+      if (!audioResponse.ok) throw new Error("Could not load the song audio");
+      const buffer = await audio.decodeAudioData(await audioResponse.arrayBuffer())
+        .catch(() => { throw new Error("This browser cannot play that audio format"); });
+      return { notes: chart.notes, buffer };
+    })();
+    preparedSongs.set(key, loading);
+    loading.catch(() => preparedSongs.delete(key));
+  }
+  return preparedSongs.get(key);
+}
+
+function scheduleSong(song, prepared, start) {
+  const songSource = audio.createBufferSource();
+  songSource.buffer = prepared.buffer;
+  songSource.connect(audio.destination);
+  songSource.start(start);
+  liveSources.push(songSource);
+  const notes = prepared.notes.map(note => ({ zone: note.zone, time: start + note.time, end: start + note.end }));
+  const end = Math.max(start + prepared.buffer.duration, (notes.at(-1)?.end ?? start) + 0.5);
+  return { name: song.title, notes, grace: songGrace, end };
+}
+
+function finishGame(rounds, stopped = false) {
   wrongStreak = 0;
   activeRound = undefined;
+  liveSources.forEach(source => source.stop());
+  liveSources = [];
+  stopButton.hidden = true;
   showZone(0);
-  if (score > best) {
+  if (!stopped && score > best) {
     best = score;
     bestScore.textContent = best;
     try {
-      localStorage.setItem(bestKey, String(best));
+      localStorage.setItem(bestKey(), String(best));
     } catch {
       // The best score is still displayed for this page.
     }
   }
-  roundLabel.textContent = "Both songs complete";
-  cue.textContent = `You hit ${score} of ${maxScore} beats!`;
+  const total = rounds.reduce((sum, round) => sum + round.notes.length, 0);
+  if (stopped) {
+    roundLabel.textContent = "Stopped";
+    cue.textContent = total ? `Stopped early. You hit ${score} of ${total} beats.` : "Stopped";
+  } else {
+    roundLabel.textContent = selectedSong ? "Song complete" : "Both songs complete";
+    cue.textContent = `You hit ${score} of ${total} beats!`;
+  }
   showFeedback("");
   speedSelector.disabled = false;
-  openStrength.disabled = false;
+  setMenusDisabled(false);
   startButton.textContent = "Play again";
   startButton.hidden = false;
   startButton.disabled = false;
-  if (zones.includes(document.activeElement)) startButton.focus();
+  if (stopped || zones.includes(document.activeElement)) startButton.focus();
 }
 
 async function startGame() {
   if (!tutorial.hidden || startButton.disabled) return;
   startButton.disabled = true;
-  openStrength.disabled = true;
+  setMenusDisabled(true);
+  let token;
   try {
     audio ??= new AudioContext();
     if (audio.state !== "running") await audio.resume();
@@ -236,63 +330,89 @@ async function startGame() {
       tutorial.hidden = false;
       startButton.hidden = true;
       roundLabel.textContent = "Tutorial";
-      openStrength.disabled = false;
+      setMenusDisabled(false);
       cue.textContent = "";
       cue.hidden = true;
       showFeedback("");
       zones[0].focus();
       return;
     }
-    const speed = Number(speedSelector.querySelector("input:checked").value);
-    const slow = scheduleTrack(tracks[0], audio.currentTime + 1, speed);
-    const fast = scheduleTrack(tracks[1], slow.end + 2, speed);
     speedSelector.disabled = true;
+    startButton.hidden = true;
+    stopRequested = false;
+    token = ++playToken;
+    stopButton.hidden = false;
+    cue.hidden = false;
+    let rounds;
+    if (selectedSong) {
+      roundLabel.textContent = selectedSong.title;
+      cue.textContent = "Making finger steps…";
+      loadingSong = true;
+      const prepared = await prepareSong(selectedSong, currentDifficulty()).finally(() => { loadingSong = false; });
+      // Stop already reset the game while the steps were loading.
+      if (token !== playToken || stopRequested) return;
+      rounds = [scheduleSong(selectedSong, prepared, audio.currentTime + 1)];
+    } else {
+      const speed = Number(speedSelector.querySelector("input:checked").value);
+      const slow = scheduleTrack(tracks[0], audio.currentTime + 1, speed);
+      rounds = [slow, scheduleTrack(tracks[1], slow.end + 2, speed)];
+    }
+    loadBest();
 
     score = 0;
     wrongStreak = 0;
     roundScore.textContent = score;
-    roundLabel.textContent = slow.name;
-    cue.hidden = false;
+    roundLabel.textContent = rounds[0].name;
     cue.textContent = "Get ready";
     showFeedback("");
-    startButton.hidden = true;
     zones[0].focus();
 
     function update() {
       const time = audio.currentTime;
-      if (time >= fast.end) {
-        finishGame();
+      if (stopRequested) {
+        finishGame(rounds, true);
         return;
       }
-      const round = time < slow.end ? slow : fast;
+      if (time >= rounds.at(-1).end) {
+        finishGame(rounds);
+        return;
+      }
+      const round = rounds.find(candidate => time < candidate.end);
       if (round !== activeRound) {
         activeRound = round;
-        activeBeat = -1;
-        hitBeats.clear();
+        activeNote = -1;
+        hitNotes.clear();
         roundLabel.textContent = round.name;
-        cue.textContent = round === slow ? "Get ready" : "Fast song up next";
+        cue.textContent = round === rounds[0] ? "Get ready" : `${round.name} up next`;
         showFeedback("");
         showZone(0);
       }
 
-      const beat = Math.floor((time - round.start) / round.beatLength);
-      if (beat >= 0 && beat !== activeBeat) {
-        activeBeat = beat;
-        const zone = round.pattern[beat];
-        showFeedback("");
-        cue.textContent = `Tap ${directions[zone - 1]}!`;
-        showZone(zone);
+      const index = noteAt(round, time);
+      if (index !== activeNote) {
+        activeNote = index;
+        if (index >= 0) {
+          const zone = round.notes[index].zone;
+          showFeedback("");
+          cue.textContent = `Tap ${directions[zone - 1]}!`;
+          showZone(zone);
+        } else {
+          showZone(0);
+        }
       }
       // Keep long, slow cues active on the hardware bridge.
       if (activeZone && time - cueSentAt >= 0.5) publishCue();
       requestAnimationFrame(update);
     }
     requestAnimationFrame(update);
-  } catch {
+  } catch (error) {
+    // A load that failed after Stop was pressed has nothing left to report.
+    if (stopRequested || (token && token !== playToken)) return;
     cue.hidden = false;
-    cue.textContent = "Audio could not start";
+    cue.textContent = error instanceof Error && error.message ? error.message : "Audio could not start";
+    stopButton.hidden = true;
     speedSelector.disabled = false;
-    openStrength.disabled = false;
+    setMenusDisabled(false);
     startButton.textContent = "Try again";
     startButton.hidden = false;
     startButton.disabled = false;
@@ -426,7 +546,7 @@ function finishSqueeze() {
   squeezeCapture = undefined;
   measureSqueeze.disabled = false;
   continueSqueeze.disabled = false;
-  openStrength.disabled = false;
+  setMenusDisabled(false);
 
   if (!reading) {
     squeezeStatus.textContent = freshSqueezeSample()
@@ -460,7 +580,7 @@ measureSqueeze.addEventListener("click", () => {
   }
   measureSqueeze.disabled = true;
   continueSqueeze.disabled = true;
-  openStrength.disabled = true;
+  setMenusDisabled(true);
   squeezeStatus.textContent = "Squeeze when ready";
   squeezeCapture = {
     armedAt: performance.now(),
@@ -468,6 +588,11 @@ measureSqueeze.addEventListener("click", () => {
     best: null,
     timeout: setTimeout(finishSqueeze, 5000),
   };
+});
+stopButton.addEventListener("click", () => {
+  stopRequested = true;
+  // While steps load there is no update loop to notice the request, so stop now.
+  if (loadingSong) finishGame([], true);
 });
 continueSqueeze.addEventListener("click", () => {
   squeeze.hidden = true;
@@ -484,4 +609,129 @@ window.addEventListener("keydown", event => {
     sendTap(Number(event.key));
   }
 });
+function songItem(song) {
+  const item = document.createElement("li");
+  const details = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = song ? song.title : "Warm-Up";
+  details.append(title);
+  // Only added songs show an artist and whether their steps are ready.
+  if (song && !song.starter) {
+    const meta = document.createElement("span");
+    const ready = song.charted?.includes(currentDifficulty());
+    meta.textContent = [song.artist, ready ? "Steps ready" : "Steps made on first play"].filter(Boolean).join(" · ");
+    details.append(meta);
+  }
+  const play = document.createElement("button");
+  play.type = "button";
+  const selected = (selectedSong?.id ?? null) === (song?.id ?? null);
+  play.textContent = selected ? "Selected" : "Play this song";
+  play.setAttribute("aria-pressed", selected);
+  play.addEventListener("click", () => chooseSong(song, play));
+  item.append(details, play);
+  return item;
+}
+
+function emptySlot(number) {
+  const item = document.createElement("li");
+  item.className = "empty-slot";
+  item.textContent = `Starter slot ${number}: add an MP3 to the songs folder`;
+  return item;
+}
+
+async function refreshSongs() {
+  let library = [];
+  try {
+    const response = await fetch("/api/songs", { cache: "no-store" });
+    if (!response.ok) throw new Error();
+    library = (await response.json()).songs;
+  } catch {
+    songStatus.textContent = "Could not load the song list. Is the game server running?";
+  }
+  const starters = library.filter(song => song.starter);
+  const uploads = library.filter(song => !song.starter);
+  starterSongs.replaceChildren(songItem(null), ...starters.map(songItem));
+  for (let slot = starters.length + 1; slot <= starterSlots; slot++) starterSongs.append(emptySlot(slot));
+  uploadedSongs.replaceChildren(...uploads.map(songItem));
+  if (!uploads.length) {
+    const none = document.createElement("li");
+    none.className = "empty-slot";
+    none.textContent = "No songs added yet";
+    uploadedSongs.append(none);
+  }
+  return library;
+}
+
+function showSelectedSong() {
+  selectedSongLabel.textContent = `Song: ${selectedSong ? selectedSong.title : "Warm-Up"}`;
+  loadBest();
+}
+
+async function chooseSong(song, button) {
+  if (!song) {
+    selectedSong = null;
+    showSelectedSong();
+    closeSongs();
+    return;
+  }
+  const difficulty = currentDifficulty();
+  songLibrary.querySelectorAll("button").forEach(control => { control.disabled = true; });
+  songStatus.textContent = `Making ${difficulty} finger steps for ${song.title}. A new song can take a minute or two…`;
+  try {
+    await prepareSong(song, difficulty);
+    selectedSong = song;
+    showSelectedSong();
+    closeSongs();
+    cue.textContent = `${song.title} is ready. Press Start game.`;
+  } catch (error) {
+    songStatus.textContent = error.message;
+    button.focus();
+  } finally {
+    songLibrary.querySelectorAll("button").forEach(control => { control.disabled = false; });
+    refreshSongs();
+  }
+}
+
+function closeSongs() {
+  songLibrary.hidden = true;
+  game.hidden = false;
+  openSongs.focus();
+}
+
+openSongs.addEventListener("click", () => {
+  game.hidden = true;
+  strengthRecord.hidden = true;
+  songLibrary.hidden = false;
+  songStatus.textContent = "";
+  refreshSongs();
+  document.getElementById("songs-title").focus();
+});
+songsReturn.addEventListener("click", closeSongs);
+
+uploadForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  const file = uploadForm.elements.file.files[0];
+  if (!file) return;
+  uploadButton.disabled = true;
+  songStatus.textContent = `Uploading ${file.name}…`;
+  try {
+    const query = new URLSearchParams({
+      filename: file.name,
+      title: uploadForm.elements.title.value,
+      artist: uploadForm.elements.artist.value,
+    });
+    const response = await fetch(`/api/songs?${query}`, { method: "POST", body: file });
+    const song = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(song.error ?? "Upload failed");
+    uploadForm.reset();
+    await refreshSongs();
+    const button = [...uploadedSongs.querySelectorAll("button")][0];
+    await chooseSong(song, button);
+  } catch (error) {
+    songStatus.textContent = error.message;
+  } finally {
+    uploadButton.disabled = false;
+  }
+});
+
 readHardware();

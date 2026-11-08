@@ -8,10 +8,14 @@ import json
 from pathlib import Path
 from threading import Lock
 from time import monotonic
+from urllib.parse import parse_qs, urlsplit
+
+import songs
 
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 ZONES = range(1, 5)
+MAX_UPLOAD = 60 * 1024 * 1024
 
 
 class DanceState:
@@ -67,12 +71,48 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/api/state":
+        url = urlsplit(self.path)
+        if url.path == "/api/state":
             self.send_json(self.state.snapshot())
+            return
+        if url.path == "/api/songs":
+            self.send_json({"songs": songs.list_songs(), "difficulties": songs.DIFFICULTIES})
+            return
+        if url.path == "/api/chart":
+            query = parse_qs(url.query)
+            try:
+                chart = songs.chart_notes(query.get("id", [None])[0], query.get("difficulty", ["Easy"])[0])
+            except songs.SongError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_GATEWAY)
+                return
+            self.send_json(chart)
             return
         super().do_GET()
 
+    def upload_song(self):
+        query = parse_qs(urlsplit(self.path).query)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if not 0 < length <= MAX_UPLOAD:
+            self.send_json({"error": "Choose an audio file up to 60 MB"}, HTTPStatus.BAD_REQUEST)
+            return
+        data = self.rfile.read(length)
+        try:
+            song = songs.save_upload(
+                query.get("filename", [""])[0], data,
+                query.get("title", [""])[0], query.get("artist", [""])[0],
+            )
+        except songs.SongError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json(song, HTTPStatus.CREATED)
+
     def do_POST(self):
+        if urlsplit(self.path).path == "/api/songs":
+            self.upload_song()
+            return
         if self.path not in ("/api/tap", "/api/cue", "/api/hardware"):
             self.send_json({"error": "Unknown endpoint"}, HTTPStatus.NOT_FOUND)
             return
@@ -130,7 +170,9 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--ddc-url", default=songs.DDC_URL, help="Dance Dance Convolution server")
     args = parser.parse_args()
+    songs.DDC_URL = args.ddc_url
     handler = partial(Handler, state=DanceState())
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
         print(f"Open http://127.0.0.1:{server.server_port}", flush=True)

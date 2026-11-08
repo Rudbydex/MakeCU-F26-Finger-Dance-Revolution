@@ -160,3 +160,35 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .strength-bar meter::-moz-meter-bar { background: #39805B; }
 .strength-conclusion { background: var(--seafoam); padding: 8px 10px; margin-bottom: 12px; }
 #return-game { min-height: 44px; padding: 6px 12px; background: var(--coral); }
+
+#open-songs { width: min(100%, 260px); min-height: 40px; padding: 5px 10px; background: var(--seafoam); }
+#open-songs:disabled { opacity: .65; cursor: default; }
+.selected-song { flex-basis: 100%; font-size: .8rem; overflow-wrap: anywhere; }
+.song-library { background: var(--shell); border: 2px solid var(--ink); padding: clamp(12px, 2.5vw, 23px); }
+.song-library h2 { font-size: clamp(1.35rem, 4vw, 1.9rem); margin-bottom: 8px; }
+.song-library h3 { margin: 14px 0 4px; font-weight: 400; font-size: 1.1rem; }
+.song-library > p { font-size: .9rem; }
+.song-list { list-style: none; margin: 0; padding: 0; }
+.song-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--sea-glass);
+}
+.song-list li > div { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.song-list li span { font-size: .75rem; }
+.song-list button { min-height: 40px; padding: 4px 10px; background: var(--seafoam); }
+.song-list button[aria-pressed="true"] { background: var(--sand); }
+.song-list .empty-slot { font-size: .8rem; opacity: .75; }
+.upload-song { display: grid; gap: 6px; margin-top: 6px; }
+.upload-song label { display: grid; gap: 2px; font-size: .85rem; }
+.upload-song input { font: inherit; font-size: .85rem; min-width: 0; padding: 4px; border: 1px solid var(--ink); background: #fff; }
+#upload-button { justify-self: start; min-height: 44px; padding: 6px 12px; background: var(--coral); }
+.song-library button:disabled { opacity: .65; cursor: default; }
+.song-status { min-height: 1.25em; margin: 10px 0; font-size: .85rem; }
+#songs-return { min-height: 44px; padding: 6px 12px; background: var(--coral); }
+@media (max-width: 680px) { .song-library { grid-row: 1; } }
+#stop { position: absolute; top: 0; right: 0; z-index: 1; min-height: 40px; padding: 4px 12px; background: var(--sand); }
