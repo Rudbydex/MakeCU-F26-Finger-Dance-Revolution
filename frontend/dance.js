@@ -42,6 +42,8 @@ const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
 const tutorialZone = 1;
+const squeezeRise = 12;
+const squeezeWindowMs = 1000;
 const directions = ["Left", "Down", "Up", "Right"];
 const arrowKeys = ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight"];
 const tracks = [
@@ -66,6 +68,8 @@ let stopRequested = false;
 let loadingSong = false;
 let playToken = 0;
 let activeRound;
+let rounds = [];
+let feedbackTimeout;
 let activeZone = 0;
 let cueSentAt = 0;
 let activeNote = -1;
@@ -77,7 +81,6 @@ let squeezeCapture;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
-const hitNotes = new Set();
 const preparedSongs = new Map();
 
 function bestKey() {
@@ -138,6 +141,7 @@ openStrength.addEventListener("click", () => {
     ? `${formatStrength.format(reference)} counts (${readingType}, ${record.hand} hand)`
     : "No squeeze recorded yet";
   game.hidden = true;
+  publishCue();
   songLibrary.hidden = true;
   strengthRecord.hidden = false;
   document.getElementById("strength-title").focus();
@@ -146,6 +150,7 @@ openStrength.addEventListener("click", () => {
 returnGame.addEventListener("click", () => {
   strengthRecord.hidden = true;
   game.hidden = false;
+  publishCue();
   openStrength.focus();
 });
 
@@ -186,11 +191,13 @@ function showZone(zone) {
 }
 
 function publishCue() {
-  cueSentAt = audio.currentTime;
-  post("/api/cue", { zone: activeZone || null });
+  cueSentAt = performance.now();
+  const zone = game.hidden ? null : tutorial.hidden ? activeZone || null : tutorialZone;
+  post("/api/cue", { zone });
 }
 
 function showFeedback(message, wrongTap = false) {
+  clearTimeout(feedbackTimeout);
   feedback.textContent = message;
   let image = defaultMascot;
   if (!tutorial.hidden || wrongStreak >= 4) image = "assets/octopus-wrong-streak.png";
@@ -207,19 +214,27 @@ function noteAt(round, time, grace = 0) {
   return -1;
 }
 
-function scoreTap(zone) {
-  if (!activeRound) return;
-  const index = noteAt(activeRound, audio.currentTime, activeRound.grace);
+function scoreTap(zone, ageMs) {
+  if (!rounds.length) return;
+  // Hardware taps arrive a little late, so score them at the time they happened.
+  const tapTime = audio.currentTime - ageMs / 1000;
+  const round = rounds.find(({ start, end, grace }) => tapTime >= start - grace && tapTime < end);
+  if (!round) return;
+  const index = noteAt(round, tapTime, round.grace);
   if (index < 0) return;
-  if (zone !== activeRound.notes[index].zone) {
+  const correct = zone === round.notes[index].zone;
+  post("/api/feedback", { zone, correct });
+  if (!correct) {
     wrongStreak += 1;
     showFeedback("Try the lit finger!", true);
+    feedbackTimeout = setTimeout(() => showFeedback(""), 350);
     return;
   }
   wrongStreak = 0;
   showFeedback("On beat!");
-  if (hitNotes.has(index)) return;
-  hitNotes.add(index);
+  feedbackTimeout = setTimeout(() => showFeedback(""), 350);
+  if (round.hitNotes.has(index)) return;
+  round.hitNotes.add(index);
   roundScore.textContent = ++score;
 }
 
@@ -245,7 +260,7 @@ function scheduleTrack(track, start, speed) {
     time: start + index * beatLength,
     end: start + (index + 1) * beatLength,
   }));
-  return { name: track.name, notes, grace: 0, end: start + track.beats * beatLength };
+  return { name: track.name, notes, grace: 0, start, end: start + track.beats * beatLength, hitNotes: new Set() };
 }
 
 function currentDifficulty() {
@@ -282,12 +297,14 @@ function scheduleSong(song, prepared, start) {
   liveSources.push(songSource);
   const notes = prepared.notes.map(note => ({ zone: note.zone, time: start + note.time, end: start + note.end }));
   const end = Math.max(start + prepared.buffer.duration, (notes.at(-1)?.end ?? start) + 0.5);
-  return { name: song.title, notes, grace: songGrace, end };
+  return { name: song.title, notes, grace: songGrace, start, end, hitNotes: new Set() };
 }
 
-function finishGame(rounds, stopped = false) {
+function finishGame(stopped = false) {
+  const total = rounds.reduce((sum, round) => sum + round.notes.length, 0);
   wrongStreak = 0;
   activeRound = undefined;
+  rounds = [];
   liveSources.forEach(source => source.stop());
   liveSources = [];
   stopButton.hidden = true;
@@ -301,7 +318,6 @@ function finishGame(rounds, stopped = false) {
       // The best score is still displayed for this page.
     }
   }
-  const total = rounds.reduce((sum, round) => sum + round.notes.length, 0);
   if (stopped) {
     roundLabel.textContent = "Stopped";
     cue.textContent = total ? `Stopped early. You hit ${score} of ${total} beats.` : "Stopped";
@@ -328,6 +344,7 @@ async function startGame() {
     if (audio.state !== "running") await audio.resume();
     if (!tutorialComplete) {
       tutorial.hidden = false;
+      publishCue();
       startButton.hidden = true;
       roundLabel.textContent = "Tutorial";
       setMenusDisabled(false);
@@ -343,7 +360,6 @@ async function startGame() {
     token = ++playToken;
     stopButton.hidden = false;
     cue.hidden = false;
-    let rounds;
     if (selectedSong) {
       roundLabel.textContent = selectedSong.title;
       cue.textContent = "Making finger steps…";
@@ -370,18 +386,21 @@ async function startGame() {
     function update() {
       const time = audio.currentTime;
       if (stopRequested) {
-        finishGame(rounds, true);
+        finishGame(true);
         return;
       }
-      if (time >= rounds.at(-1).end) {
-        finishGame(rounds);
+      const end = rounds.at(-1).end;
+      if (time >= end) {
+        // Give the last beat's queued taps time to reach the browser.
+        showZone(0);
+        if (time >= end + 0.15) finishGame();
+        else requestAnimationFrame(update);
         return;
       }
       const round = rounds.find(candidate => time < candidate.end);
       if (round !== activeRound) {
         activeRound = round;
         activeNote = -1;
-        hitNotes.clear();
         roundLabel.textContent = round.name;
         cue.textContent = round === rounds[0] ? "Get ready" : `${round.name} up next`;
         showFeedback("");
@@ -393,15 +412,12 @@ async function startGame() {
         activeNote = index;
         if (index >= 0) {
           const zone = round.notes[index].zone;
-          showFeedback("");
           cue.textContent = `Tap ${directions[zone - 1]}!`;
           showZone(zone);
         } else {
           showZone(0);
         }
       }
-      // Keep long, slow cues active on the hardware bridge.
-      if (activeZone && time - cueSentAt >= 0.5) publishCue();
       requestAnimationFrame(update);
     }
     requestAnimationFrame(update);
@@ -419,18 +435,21 @@ async function startGame() {
   }
 }
 
-function handleTap(zone) {
+function handleTap(zone, ageMs = 0) {
   if (game.hidden) return;
   if (tutorial.hidden) {
-    scoreTap(zone);
+    scoreTap(zone, ageMs);
     return;
   }
-  if (zone !== tutorialZone) {
+  const correct = zone === tutorialZone;
+  post("/api/feedback", { zone, correct });
+  if (!correct) {
     showFeedback("Try the green index finger.");
     return;
   }
   tutorialComplete = true;
   tutorial.hidden = true;
+  publishCue();
   startButton.disabled = false;
   startGame();
 }
@@ -440,10 +459,12 @@ function sendTap(zone) {
   post("/api/tap", { zone, source: "browser" });
 }
 
-function showHardwareStatus(hardware) {
+function showHardwareStatus(hardware, samples = []) {
   latestHardware = hardware;
   hardwareReceivedAt = performance.now();
-  observeSqueeze();
+  for (const sample of samples.length ? samples : hardware ? [hardware] : []) {
+    observeSqueeze(sample);
+  }
   const connected = Boolean(hardware);
   const label = connected ? "Sensor connected" : "Waiting for sensor";
   if (sensorConnection.textContent !== label) sensorConnection.textContent = label;
@@ -459,25 +480,29 @@ async function readHardware() {
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.ok) {
-      const { last_tap: tap, hardware } = await response.json();
-      showHardwareStatus(hardware);
+      const { last_tap: tap, hardware_taps: taps, hardware, hardware_samples: samples } = await response.json();
+      showHardwareStatus(hardware, samples);
       // Ignore a tap left over from before this page opened.
       if (!hardwareStateSeen) {
         hardwareStateSeen = true;
         lastTapId = tap?.id ?? 0;
       }
       if (!tap || tap.id < lastTapId) lastTapId = 0;
-      if (tap && tap.id > lastTapId) {
-        lastTapId = tap.id;
-        if (tap.source === "hardware") handleTap(tap.zone);
+      const pendingTaps = taps ?? (tap?.source === "hardware" ? [tap] : []);
+      for (const pendingTap of pendingTaps) {
+        if (pendingTap.id > lastTapId) handleTap(pendingTap.zone, pendingTap.age_ms);
       }
+      lastTapId = tap?.id ?? 0;
     } else {
       showHardwareStatus(null);
     }
   } catch {
     showHardwareStatus(null);
   } finally {
-    setTimeout(readHardware, 65);
+    if (!game.hidden && (activeZone || !tutorial.hidden) && performance.now() - cueSentAt >= 500) {
+      publishCue();
+    }
+    setTimeout(readHardware, rounds.length || !tutorial.hidden ? 25 : 65);
   }
 }
 
@@ -511,34 +536,43 @@ function freshSqueezeSample() {
   return age >= 0 && age <= 850 ? latestHardware : null;
 }
 
-function observeSqueeze() {
-  if (!squeezeCapture) return;
-  const sample = freshSqueezeSample();
-  if (!sample?.zone) return;
+function observeSqueeze(sample) {
+  const capture = squeezeCapture;
+  if (!capture || (sample.id !== undefined && sample.id <= capture.lastSampleId)) return;
+  capture.lastSampleId = sample.id ?? capture.lastSampleId;
   const sampledAt = hardwareReceivedAt - sample.age_ms;
-  if (sampledAt < squeezeCapture.armedAt) return;
+  if (sampledAt < capture.armedAt) return;
 
-  if (squeezeCapture.endsAt === null) {
-    clearTimeout(squeezeCapture.timeout);
-    squeezeCapture.endsAt = sampledAt + 1000;
-    squeezeCapture.timeout = setTimeout(finishSqueeze, Math.max(0, squeezeCapture.endsAt - performance.now()));
-    squeezeStatus.textContent = "Pinch detected. Measuring for 1 second.";
+  if (capture.endsAt === null) {
+    if (!sample.zone && sample.fsr - capture.baseline < squeezeRise) return;
+    clearTimeout(capture.timeout);
+    capture.endsAt = sampledAt + squeezeWindowMs;
+    // Allow the next poll to deliver samples recorded just before the window closed.
+    const delay = Math.max(0, capture.endsAt + 200 - performance.now());
+    capture.timeout = setTimeout(finishSqueeze, delay);
   }
-  if (sampledAt > squeezeCapture.endsAt) return;
+  if (sampledAt > capture.endsAt) {
+    clearTimeout(capture.timeout);
+    finishSqueeze();
+    return;
+  }
 
   const counts = sample.pressure_counts ?? null;
   const average = counts
     ? (counts.reduce((sum, count) => sum + count, 0) - Math.min(...counts)) / 3
     : null;
-  const best = squeezeCapture.best;
-  if (!best || (average !== null && (best.fingerPressureAverage === null || average > best.fingerPressureAverage))
-      || (average === null && best.fingerPressureAverage === null && sample.fsr > best.thumbPressure)) {
-    squeezeCapture.best = {
-      thumbPressure: sample.fsr,
-      fingerPressureCounts: counts,
-      fingerPressureAverage: average,
-    };
-  }
+  const best = capture.best;
+  const hasFingerAverage = best?.fingerPressureAverage != null;
+  if (best && (average !== null
+    ? hasFingerAverage && average <= best.fingerPressureAverage
+    : hasFingerAverage || sample.fsr <= best.thumbPressure)) return;
+
+  capture.best = {
+    thumbPressure: sample.fsr,
+    fingerPressureCounts: counts,
+    fingerPressureAverage: average,
+  };
+  squeezeStatus.textContent = `Measuring… Peak so far: ${formatStrength.format(average ?? sample.fsr)} counts.`;
 }
 
 function finishSqueeze() {
@@ -574,8 +608,13 @@ function finishSqueeze() {
 }
 
 measureSqueeze.addEventListener("click", () => {
-  if (!freshSqueezeSample()) {
+  const sample = freshSqueezeSample();
+  if (!sample) {
     squeezeStatus.textContent = "Waiting for the glove. Connect it before starting the squeeze.";
+    return;
+  }
+  if (sample.zone) {
+    squeezeStatus.textContent = "Release your grip, then click Begin squeeze again.";
     return;
   }
   measureSqueeze.disabled = true;
@@ -584,6 +623,8 @@ measureSqueeze.addEventListener("click", () => {
   squeezeStatus.textContent = "Squeeze when ready";
   squeezeCapture = {
     armedAt: performance.now(),
+    baseline: sample.fsr,
+    lastSampleId: sample.id ?? 0,
     endsAt: null,
     best: null,
     timeout: setTimeout(finishSqueeze, 5000),
@@ -592,7 +633,7 @@ measureSqueeze.addEventListener("click", () => {
 stopButton.addEventListener("click", () => {
   stopRequested = true;
   // While steps load there is no update loop to notice the request, so stop now.
-  if (loadingSong) finishGame([], true);
+  if (loadingSong) finishGame(true);
 });
 continueSqueeze.addEventListener("click", () => {
   squeeze.hidden = true;

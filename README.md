@@ -23,7 +23,7 @@ song, followed by the 16-beat fast song.
 **See your strength record!** shows the most recent squeeze saved in this
 browser. Earlier rows and the example conclusion are generated for the demo.
 
-Choose **Relax** (0.5×), **Practise** (0.8×, the default), or **Hard work** (1.3×)
+Choose **Relax** (0.5×), **Practice** (0.8×, the default), or **Hard work** (1.3×)
 before the songs start. Both rounds use synthesized notes and a newly shuffled
 pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 
@@ -61,7 +61,7 @@ The speed setting picks the DDC difficulty:
 | Speed | DDC difficulty | Minimum gap between pinches |
 | --- | --- | --- |
 | Relax | Easy | 0.6 s |
-| Practise | Medium | 0.42 s |
+| Practice | Medium | 0.42 s |
 | Hard work | Hard | 0.3 s |
 
 Charts are cached in a `charts/` folder next to each audio file. A cached chart
@@ -85,9 +85,7 @@ python3 backend/chart_songs.py            # Easy, Medium, and Hard for every sta
 
 ## Connecting hardware
 
-Set `TEST_MODE = true` in the Arduino UNO R4 rehab sketch and upload it to
-stream sensor samples. The bridge supports both that sketch's `-> CONTACT: INDEX`
-format and the older contact detector's `>>> CONTACT: INDEX` format. Start the
+Upload the Finger Dance Revolution controller sketch to the Arduino. Start the
 game server, then run these commands in a second terminal from the project folder:
 
 ```sh
@@ -96,34 +94,25 @@ python3 -m serial.tools.list_ports
 python3 backend/serial_bridge.py /dev/cu.usbmodem1234
 ```
 
-Replace the sample port with the Arduino port and close Arduino Serial Monitor
+Replace the example USB port with your Arduino port. Close Arduino Serial Monitor
 before opening the bridge. Keep your thumb off the FSR during board startup so
-the sketch can calibrate. The bridge sends one tap per contact and waits for a
-release or a change of finger before sending another.
+it can calibrate. If the game server uses a different port, pass its URL to the
+bridge with `--server`, for example `--server http://127.0.0.1:8002`.
 
-The game displays **Sensor connected** while it receives live Arduino readings.
-The status also shows the raw thumb pressure and the finger currently detected.
+The bridge enables the controller's raw pressure stream. The website scores
+each contact and sends the result back as a brief RGB flash. Correct index,
+middle, ring, and pinky taps flash green, blue, yellow, and purple respectively.
+A wrong tap flashes red. **Sensor connected** appears once the game receives
+live pressure samples. Use `--debug` to see the USB messages.
 
-Click **Begin squeeze**, then pinch when ready. The squeeze check uses the
-strongest live reading from the first second after the glove detects contact.
-The current Arduino bridge sends a single thumb reading. A bridge with individual
-finger pressure sensors can send `pressure_counts` with four counts in index,
-middle, ring, little order to `POST /api/hardware`. The game drops the lowest
-count from each sample, then saves the highest average of the remaining three.
+For the squeeze check, relax your hand, click **Begin squeeze**, then squeeze
+firmly and comfortably. A rise in thumb pressure or a reported pinch starts
+the one-second capture. The game displays the running peak and saves the
+highest raw reading for the selected hand. The controller sends one thumb
+pressure reading and four digital touch flags.
 
-Run the bridge on the same computer as the server. Have it map the board's sensor
-events to zones 1–4 and send one request per tap:
-
-```sh
-curl -X POST http://127.0.0.1:8000/api/tap \
-  -H 'Content-Type: application/json' \
-  -d '{"zone":2,"source":"hardware"}'
-```
-
-The browser reads hardware taps for scoring. Poll `GET /api/state` to read `cue`, the zone
-to light, or `null` to turn the lights off. The browser posts cue changes to
-`/api/cue`. The server clears a cue after 750 ms as a fallback if playback stops.
-The demo assumes a single browser drives the session.
+The older contact-detector sketches can still send taps and pressure, but only
+the controller sketch supports RGB feedback from the webpage.
 
 Both tempo settings and the pattern generator live in `frontend/dance.js`.
 
