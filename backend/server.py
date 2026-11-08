@@ -58,24 +58,29 @@ class DanceState:
                 "cue": cue,
                 "led_color": self.led_color if now < self.led_until else "OFF",
                 "hardware": hardware,
+                "thumb_placement_supported": True,
                 "hardware_samples": samples,
             }
 
-    def record_hardware(self, fsr, zone, pressure_counts=None):
+    def record_hardware(self, fsr, zone, pressure_counts=None, thumb_sensor=None):
         with self.lock:
             self.hardware_id += 1
             self.hardware = {"fsr": fsr, "zone": zone, "id": self.hardware_id}
             if pressure_counts is not None:
                 self.hardware["pressure_counts"] = pressure_counts
+            if thumb_sensor is not None:
+                self.hardware["thumb_sensor"] = thumb_sensor
             self.hardware_received_at = monotonic()
             self.hardware_until = self.hardware_received_at + 2
             self.hardware_samples.append((self.hardware_received_at, self.hardware))
 
-    def record_tap(self, zone, source):
+    def record_tap(self, zone, source, centered=None):
         with self.lock:
             tap_id = self.last_tap["id"] + 1 if self.last_tap else 1
             self.last_tap = {"id": tap_id, "zone": zone, "source": source}
             if source == "hardware":
+                if centered is not None:
+                    self.last_tap["centered"] = centered
                 self.hardware_taps.append((monotonic(), self.last_tap))
             return self.last_tap
 
@@ -181,7 +186,11 @@ class Handler(SimpleHTTPRequestHandler):
             ):
                 self.send_json({"error": "Expected four nonnegative finger pressure counts"}, HTTPStatus.BAD_REQUEST)
                 return
-            self.state.record_hardware(fsr, zone, pressure_counts)
+            thumb_sensor = body.get("thumb_sensor")
+            if thumb_sensor not in (None, "sensx25"):
+                self.send_json({"error": "Unsupported thumb sensor"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.state.record_hardware(fsr, zone, pressure_counts, thumb_sensor)
             self.send_json({"ok": True})
             return
 
@@ -203,7 +212,11 @@ class Handler(SimpleHTTPRequestHandler):
         if source not in ("browser", "hardware"):
             self.send_json({"error": "Invalid tap source"}, HTTPStatus.BAD_REQUEST)
             return
-        self.send_json(self.state.record_tap(zone, source))
+        centered = body.get("centered")
+        if centered is not None and (type(centered) is not bool or source != "hardware"):
+            self.send_json({"error": "Expected a boolean placement on a hardware tap"}, HTTPStatus.BAD_REQUEST)
+            return
+        self.send_json(self.state.record_tap(zone, source, centered))
 
     def log_request(self, code="-", size="-"):
         if not self.path.startswith("/api/") or str(code).startswith(("4", "5")):
