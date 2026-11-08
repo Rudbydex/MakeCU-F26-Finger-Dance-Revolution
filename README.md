@@ -31,9 +31,10 @@ pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 
 ## Connecting hardware
 
-The Arduino contact-detector sketch prints `>>> CONTACT: INDEX` (or
-`MIDDLE`, `RING`, `PINKY`) in its sensor sample lines. Start the game server,
-then run these commands in a second terminal from the project folder:
+Set `TEST_MODE = true` in the Arduino UNO R4 rehab sketch and upload it to
+stream sensor samples. The bridge supports both that sketch's `-> CONTACT: INDEX`
+format and the older contact detector's `>>> CONTACT: INDEX` format. Start the
+game server, then run these commands in a second terminal from the project folder:
 
 ```sh
 python3 -m pip install pyserial
@@ -49,11 +50,12 @@ release or a change of finger before sending another.
 The game displays **Sensor connected** while it receives live Arduino readings.
 The status also shows the raw thumb pressure and the finger currently detected.
 
-The current Arduino bridge sends the shared thumb pressure. The squeeze check
-saves this as a thumb-only reading. A bridge with individual finger pressure
-sensors can send `pressure_counts` with four counts in index, middle, ring,
-little order to `POST /api/hardware`. The squeeze check discards one lowest
-count and averages the other three.
+Click **Begin squeeze**, then pinch when ready. The squeeze check uses the
+strongest live reading from the first second after the glove detects contact.
+The current Arduino bridge sends a single thumb reading. A bridge with individual
+finger pressure sensors can send `pressure_counts` with four counts in index,
+middle, ring, little order to `POST /api/hardware`. The game drops the lowest
+count from each sample, then saves the highest average of the remaining three.
 
 Run the bridge on the same computer as the server. Have it map the board's sensor
 events to zones 1–4 and send one request per tap:

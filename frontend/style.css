@@ -1,6 +1,6 @@
 @font-face {
   font-family: "Pastel Crayon";
-  src: local("pastel"), url("assets/pastel-crayon.ttf") format("truetype");
+  src: url("assets/pastel-crayon.ttf") format("truetype");
   font-display: swap;
 }
 

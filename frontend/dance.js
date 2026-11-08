@@ -55,6 +55,7 @@ let lastTapId = 0;
 let hardwareStateSeen = false;
 let latestHardware;
 let hardwareReceivedAt = 0;
+let squeezeCapture;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
@@ -322,6 +323,7 @@ function sendTap(zone) {
 function showHardwareStatus(hardware) {
   latestHardware = hardware;
   hardwareReceivedAt = performance.now();
+  observeSqueeze();
   const connected = Boolean(hardware);
   const label = connected ? "Sensor connected" : "Waiting for sensor";
   if (sensorConnection.textContent !== label) sensorConnection.textContent = label;
@@ -384,48 +386,88 @@ handOptions.forEach(button => button.addEventListener("click", () => {
   measureSqueeze.focus();
 }));
 
+function freshSqueezeSample() {
+  const age = latestHardware?.age_ms + performance.now() - hardwareReceivedAt;
+  return age >= 0 && age <= 850 ? latestHardware : null;
+}
+
+function observeSqueeze() {
+  if (!squeezeCapture) return;
+  const sample = freshSqueezeSample();
+  if (!sample?.zone) return;
+  const sampledAt = hardwareReceivedAt - sample.age_ms;
+  if (sampledAt < squeezeCapture.armedAt) return;
+
+  if (squeezeCapture.endsAt === null) {
+    clearTimeout(squeezeCapture.timeout);
+    squeezeCapture.endsAt = sampledAt + 1000;
+    squeezeCapture.timeout = setTimeout(finishSqueeze, Math.max(0, squeezeCapture.endsAt - performance.now()));
+    squeezeStatus.textContent = "Pinch detected. Measuring for 1 second.";
+  }
+  if (sampledAt > squeezeCapture.endsAt) return;
+
+  const counts = sample.pressure_counts ?? null;
+  const average = counts
+    ? (counts.reduce((sum, count) => sum + count, 0) - Math.min(...counts)) / 3
+    : null;
+  const best = squeezeCapture.best;
+  if (!best || (average !== null && (best.fingerPressureAverage === null || average > best.fingerPressureAverage))
+      || (average === null && best.fingerPressureAverage === null && sample.fsr > best.thumbPressure)) {
+    squeezeCapture.best = {
+      thumbPressure: sample.fsr,
+      fingerPressureCounts: counts,
+      fingerPressureAverage: average,
+    };
+  }
+}
+
+function finishSqueeze() {
+  const reading = squeezeCapture.best;
+  squeezeCapture = undefined;
+  measureSqueeze.disabled = false;
+  continueSqueeze.disabled = false;
+  openStrength.disabled = false;
+
+  if (!reading) {
+    squeezeStatus.textContent = freshSqueezeSample()
+      ? "No pinch detected. Touch your fingers to your thumb and try again."
+      : "Lost the sensor signal. Check the connection and try again.";
+    measureSqueeze.focus();
+    return;
+  }
+
+  const measurement = { ...reading, hand: selectedHand, measuredAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(strengthKey + selectedHand, JSON.stringify(measurement));
+  } catch {
+    squeezeStatus.textContent = "This browser could not save the reading. Try again or skip.";
+    measureSqueeze.focus();
+    return;
+  }
+  const average = measurement.fingerPressureAverage;
+  squeezeStatus.textContent = average === null
+    ? `Peak thumb reading saved: ${measurement.thumbPressure} counts.`
+    : `Peak finger pressure average saved: ${average.toFixed(1)} counts.`;
+  measureSqueeze.hidden = true;
+  continueSqueeze.textContent = "Continue";
+  continueSqueeze.focus();
+}
+
 measureSqueeze.addEventListener("click", () => {
+  if (!freshSqueezeSample()) {
+    squeezeStatus.textContent = "Waiting for the glove. Connect it before starting the squeeze.";
+    return;
+  }
   measureSqueeze.disabled = true;
   continueSqueeze.disabled = true;
   openStrength.disabled = true;
-  squeezeStatus.textContent = "Get ready";
-  setTimeout(() => { squeezeStatus.textContent = "Squeeze and hold"; }, 400);
-  setTimeout(() => {
-    measureSqueeze.disabled = false;
-    continueSqueeze.disabled = false;
-    openStrength.disabled = false;
-    const sampleAge = latestHardware?.age_ms + performance.now() - hardwareReceivedAt;
-    if (!(sampleAge >= 0 && sampleAge <= 850)) {
-      squeezeStatus.textContent = "No fresh sensor reading. Check the connection and try again.";
-      measureSqueeze.focus();
-      return;
-    }
-
-    const counts = latestHardware.pressure_counts ?? null;
-    const average = counts
-      ? (counts.reduce((sum, count) => sum + count, 0) - Math.min(...counts)) / 3
-      : null;
-    const measurement = {
-      hand: selectedHand,
-      thumbPressure: latestHardware.fsr,
-      fingerPressureCounts: counts,
-      fingerPressureAverage: average,
-      measuredAt: new Date().toISOString(),
-    };
-    try {
-      localStorage.setItem(strengthKey + selectedHand, JSON.stringify(measurement));
-    } catch {
-      squeezeStatus.textContent = "This browser could not save the reading. Try again or skip.";
-      measureSqueeze.focus();
-      return;
-    }
-    squeezeStatus.textContent = average === null
-      ? `Thumb reading saved: ${measurement.thumbPressure}. Individual finger pressure unavailable.`
-      : `Finger pressure average saved: ${average.toFixed(1)}.`;
-    measureSqueeze.hidden = true;
-    continueSqueeze.textContent = "Continue";
-    continueSqueeze.focus();
-  }, 2400);
+  squeezeStatus.textContent = "Squeeze when ready";
+  squeezeCapture = {
+    armedAt: performance.now(),
+    endsAt: null,
+    best: null,
+    timeout: setTimeout(finishSqueeze, 5000),
+  };
 });
 continueSqueeze.addEventListener("click", () => {
   squeeze.hidden = true;
