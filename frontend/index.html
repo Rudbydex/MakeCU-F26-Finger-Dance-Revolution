@@ -6,8 +6,8 @@
   <title>Finger Dance Revolution</title>
   <link rel="preload" as="image" href="assets/octopus-wrong.png">
   <link rel="preload" as="image" href="assets/octopus-wrong-streak.png">
-  <link rel="stylesheet" href="style.css?v=speed">
-  <script src="dance.js?v=speed" defer></script>
+  <link rel="stylesheet" href="style.css?v=hardware">
+  <script src="dance.js?v=hardware" defer></script>
 </head>
 <body>
   <main>
@@ -22,6 +22,10 @@
         <div class="game-header">
           <h2 id="game-title">Rhythm game</h2>
           <p id="round-label">Tutorial up next</p>
+          <div class="sensor-status">
+            <p id="sensor-connection" role="status">Waiting for sensor</p>
+            <p id="sensor-reading" hidden></p>
+          </div>
         </div>
         <fieldset id="speed" class="speed">
           <legend>Speed</legend>

@@ -8,6 +8,8 @@ const roundScore = document.getElementById("round-score");
 const bestScore = document.getElementById("best-score");
 const cue = document.getElementById("cue");
 const feedback = document.getElementById("feedback");
+const sensorConnection = document.getElementById("sensor-connection");
+const sensorReading = document.getElementById("sensor-reading");
 const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
@@ -238,11 +240,24 @@ function sendTap(zone) {
   post("/api/tap", { zone, source: "browser" });
 }
 
+function showHardwareStatus(hardware) {
+  const connected = Boolean(hardware);
+  const label = connected ? "Sensor connected" : "Waiting for sensor";
+  if (sensorConnection.textContent !== label) sensorConnection.textContent = label;
+  sensorConnection.dataset.connected = connected;
+  sensorReading.hidden = !connected;
+  if (connected) {
+    const contact = hardware.zone ? zones[hardware.zone - 1].textContent.trim() : "No pinch";
+    sensorReading.textContent = `Thumb pressure ${hardware.fsr} / ${contact}`;
+  }
+}
+
 async function readHardware() {
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (response.ok) {
-      const { last_tap: tap } = await response.json();
+      const { last_tap: tap, hardware } = await response.json();
+      showHardwareStatus(hardware);
       // Ignore a tap left over from before this page opened.
       if (!hardwareStateSeen) {
         hardwareStateSeen = true;
@@ -253,9 +268,11 @@ async function readHardware() {
         lastTapId = tap.id;
         if (tap.source === "hardware") handleTap(tap.zone);
       }
+    } else {
+      showHardwareStatus(null);
     }
   } catch {
-    // Retry on the next poll if the backend is restarting.
+    showHardwareStatus(null);
   } finally {
     setTimeout(readHardware, 65);
   }

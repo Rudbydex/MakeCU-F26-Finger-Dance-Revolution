@@ -120,3 +120,7 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
   .game { grid-row: 1; }
   .mascot { width: min(54%, 210px); justify-self: center; }
 }
+
+.sensor-status { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 3px 10px; align-items: center; font-size: .8rem; }
+#sensor-connection { background: var(--sand); padding: 3px 7px; }
+#sensor-connection[data-connected="true"] { background: var(--seafoam); }

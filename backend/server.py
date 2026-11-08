@@ -20,11 +20,20 @@ class DanceState:
         self.last_tap = None
         self.cue = None
         self.cue_until = 0.0
+        self.hardware = None
+        self.hardware_until = 0.0
 
     def snapshot(self):
         with self.lock:
-            cue = self.cue if monotonic() < self.cue_until else None
-            return {"last_tap": self.last_tap, "cue": cue}
+            now = monotonic()
+            cue = self.cue if now < self.cue_until else None
+            hardware = self.hardware if now < self.hardware_until else None
+            return {"last_tap": self.last_tap, "cue": cue, "hardware": hardware}
+
+    def record_hardware(self, fsr, zone):
+        with self.lock:
+            self.hardware = {"fsr": fsr, "zone": zone}
+            self.hardware_until = monotonic() + 2
 
     def record_tap(self, zone, source):
         with self.lock:
@@ -59,7 +68,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        if self.path not in ("/api/tap", "/api/cue"):
+        if self.path not in ("/api/tap", "/api/cue", "/api/hardware"):
             self.send_json({"error": "Unknown endpoint"}, HTTPStatus.NOT_FOUND)
             return
 
@@ -70,15 +79,23 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict) or "zone" not in body:
                 raise ValueError
-            zone = body["zone"]
-            if not (type(zone) is int and zone in ZONES):
-                if self.path != "/api/cue" or zone is not None:
-                    raise ValueError
         except (ValueError, UnicodeError):
-            self.send_json(
-                {"error": "Expected a JSON object with a zone from 1 to 4"},
-                HTTPStatus.BAD_REQUEST,
-            )
+            self.send_json({"error": "Expected a JSON object with a zone"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        zone = body["zone"]
+        valid_zone = type(zone) is int and zone in ZONES
+        if not valid_zone and (zone is not None or self.path == "/api/tap"):
+            self.send_json({"error": "Expected a zone from 1 to 4"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if self.path == "/api/hardware":
+            fsr = body.get("fsr")
+            if type(fsr) is not int or fsr < 0:
+                self.send_json({"error": "Expected a nonnegative FSR reading"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.state.record_hardware(fsr, zone)
+            self.send_json({"ok": True})
             return
 
         if self.path == "/api/cue":
