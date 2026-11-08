@@ -99,6 +99,29 @@ before opening the bridge. Keep your thumb off the FSR during board startup so
 it can calibrate. If the game server uses a different port, pass its URL to the
 bridge with `--server`, for example `--server http://127.0.0.1:8002`.
 
+### TouchTronix thumb sensor
+
+With the fingertip-only Arduino sketch, connect both the Arduino and the
+SensX25 FTDI adapter. Close Arduino Serial Monitor and the TouchTronix viewer
+before opening the bridge. The bridge needs both serial ports.
+
+```sh
+python3 backend/serial_bridge.py auto --thumb-port auto --debug
+```
+
+If automatic selection cannot identify either device, run
+`python3 -m serial.tools.list_ports -v` and replace each `auto` with its
+serial port. Use the same server URL in the bridge and the browser.
+
+Start with no pressure on the thumb pad. The bridge combines an active
+fingertip with the total of the 25 SensX25 readings. If needed, tune the
+total required to trigger a pinch with `--thumb-threshold` (default 80).
+The tutorial requires an index pinch whose pressure center is within the
+middle 3 × 3 cells. Release and try again after an off-center pinch. During a
+song, an on-beat pinch can still score while the game coaches placement.
+
+The existing Arduino thumb FSR setup uses the command without `--thumb-port`.
+
 The bridge enables the controller's raw pressure stream. The website scores
 each contact and sends the result back as a brief RGB flash. Correct index,
 middle, ring, and pinky taps flash green, blue, yellow, and purple respectively.
