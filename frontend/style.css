@@ -59,13 +59,13 @@ h1 { font-size: min(8cqi, 4.7rem); line-height: 1; margin: .12em 0 .16em; white-
 .speed-scale {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .speed-scale::before {
   content: "";
   position: absolute;
   top: 10px;
-  inset-inline: 16.67%;
+  inset-inline: 10%;
   height: 2px;
   background: var(--sea-glass);
 }
@@ -171,14 +171,15 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .song-list { list-style: none; margin: 0; padding: 0; }
 .song-list li {
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 6px 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--sea-glass);
 }
-.song-list li > div { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.song-list li > div:first-child { display: grid; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.song-controls { display: flex; flex: none; align-items: center; gap: 6px; }
+.song-level { font: inherit; font-size: .8rem; min-height: 40px; padding: 2px 4px; color: var(--ink); background: #fff; border: 1px solid var(--ink); border-radius: 0; }
 .song-list li span { font-size: .75rem; }
 .song-list button { min-height: 40px; padding: 4px 10px; background: var(--seafoam); }
 .song-list button[aria-pressed="true"] { background: var(--sand); }
@@ -191,4 +192,9 @@ button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .song-status { min-height: 1.25em; margin: 10px 0; font-size: .85rem; }
 #songs-return { min-height: 44px; padding: 6px 12px; background: var(--coral); }
 @media (max-width: 680px) { .song-library { grid-row: 1; } }
+.finger-check { display: grid; justify-items: center; gap: 10px; max-width: 32em; text-align: center; }
+.finger-check-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.finger-check-actions button { min-height: 44px; padding: 6px 14px; }
+#practice-finger { background: var(--seafoam); }
+#rest-finger { background: var(--sand); }
 #stop { position: absolute; top: 0; right: 0; z-index: 1; min-height: 40px; padding: 4px 12px; background: var(--sand); }

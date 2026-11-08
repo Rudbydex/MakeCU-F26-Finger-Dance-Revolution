@@ -23,7 +23,7 @@ song, followed by the 16-beat fast song.
 **See your strength record!** shows the most recent squeeze saved in this
 browser. Earlier rows and the example conclusion are generated for the demo.
 
-Choose **Relax** (0.5×), **Practice** (0.8×, the default), or **Hard work** (1.3×)
+Choose **Gentle** (0.4×), **Relax** (0.5×), **Practice** (0.8×, the default), **Hard work** (1.3×), or **Challenge** (1.6×)
 before the songs start. Both rounds use synthesized notes and a newly shuffled
 pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 
@@ -37,6 +37,39 @@ pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
 - `frontend/` contains the plain HTML, CSS, JavaScript, octopus and hand artwork.
 - `backend/` serves the page and exchanges JSON with a hardware bridge.
   The server uses Python's standard library. The serial bridge uses pySerial.
+
+## Adaptive coach
+
+The game adapts to each player and keeps a separate profile for each hand in
+the browser. It does this quietly, without on-screen messages.
+
+**Difficulty.** The game tracks the hit rate over the last 10 notes.
+
+- Below 50%: it eases off. During a song it switches to the next easier chart,
+  but only if that chart is already made. Otherwise it skips every third note,
+  then every second note.
+- 90% or more: it brings the skipped notes back, then steps up a level.
+- The level you finish on, adjusted by how the end went, becomes the next
+  play's starting level.
+
+Picking a difficulty yourself, on the speed scale or next to a starter song,
+always wins for that play.
+
+**Fingers.** After a play, the game checks each finger. A finger is struggling
+if it hits under 75% and at least 20 points below the others. It is also
+struggling if it is suddenly much slower than usual (1.6× its normal reaction
+time). When a finger is struggling, the game asks:
+
+> It looks like you're struggling with the ring finger. Would you like to practice more?
+
+- **Practice more** gives that finger about 35% of the steps instead of 25%.
+  This lasts until it hits 80% or better and keeps up with the others, for at
+  most 5 plays.
+- **Take a break** gives that finger about 10% of the steps. This lasts at
+  least 2 plays and at most 4. It ends early once the finger has recovered.
+
+Notes keep their original finger whenever possible, so the choreography only
+changes as much as needed. The tuning values are at the top of `frontend/coach.js`.
 
 ## Songs
 
@@ -60,9 +93,11 @@ The speed setting picks the DDC difficulty:
 
 | Speed | DDC difficulty | Minimum gap between pinches |
 | --- | --- | --- |
+| Gentle | Beginner | 0.75 s |
 | Relax | Easy | 0.6 s |
 | Practice | Medium | 0.42 s |
 | Hard work | Hard | 0.3 s |
+| Challenge | Challenge | 0.24 s |
 
 Charts are cached in a `charts/` folder next to each audio file. A cached chart
 skips DDC the next time.
@@ -80,7 +115,7 @@ python3 backend/server.py --ddc-url http://other-host:8080   # or set DDC_URL
 To pre-chart the starter songs so the demo does not need DDC running, run:
 
 ```sh
-python3 backend/chart_songs.py            # Easy, Medium, and Hard for every starter
+python3 backend/chart_songs.py            # all five difficulties for every starter
 ```
 
 ## Connecting hardware
@@ -114,7 +149,7 @@ pressure reading and four digital touch flags.
 The older contact-detector sketches can still send taps and pressure, but only
 the controller sketch supports RGB feedback from the webpage.
 
-Both tempo settings and the pattern generator live in `frontend/dance.js`.
+The tempo settings and the pattern generator live in `frontend/dance.js`; the adaptive coach lives in `frontend/coach.js`.
 
 Pastel Crayon is by Letters + Numbers. The DaFont edition is listed as free for
 personal use on [DaFont](https://www.dafont.com/pastel-crayon.font).

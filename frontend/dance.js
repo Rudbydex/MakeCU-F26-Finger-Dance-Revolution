@@ -38,6 +38,10 @@ const uploadForm = document.getElementById("upload-song");
 const uploadButton = document.getElementById("upload-button");
 const songStatus = document.getElementById("song-status");
 const selectedSongLabel = document.getElementById("selected-song");
+const fingerCheck = document.getElementById("finger-check");
+const fingerQuestion = document.getElementById("finger-question");
+const practiceFinger = document.getElementById("practice-finger");
+const restFinger = document.getElementById("rest-finger");
 const mascot = document.querySelector(".mascot");
 const defaultMascot = mascot.getAttribute("src");
 
@@ -52,9 +56,17 @@ const tracks = [
 ];
 const warmupBestKey = "finger-dance-two-round-best";
 const starterSlots = 3;
-// Each speed asks DDC for a matching difficulty when playing a real song.
-const songDifficulty = { "0.5": "Easy", "0.8": "Medium", "1.3": "Hard" };
+// The speed radios, in order, are the coach's levels (LEVELS in coach.js). Each one
+// sets the warm-up tempo from its value and asks DDC for the matching difficulty.
+const levelInputs = [...speedSelector.querySelectorAll("input")];
+const levelNames = levelInputs.map(input => input.parentElement.textContent.trim());
 const songGrace = 0.12;
+// Notes are committed this far ahead so the coach can still shape upcoming steps.
+const lookahead = 0.2;
+// A note counts as missed once late hardware taps for it have had time to arrive.
+const missDelay = 0.15;
+// Keep pinches at least this far apart when the coach switches charts mid-song.
+const switchGap = 0.24;
 const strengthKey = "finger-dance-squeeze-";
 const demoStrengths = Array.from(exampleStrengths, () => 50 + Math.floor(Math.random() * 101));
 const formatStrength = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
@@ -81,7 +93,13 @@ let squeezeCapture;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
-const preparedSongs = new Map();
+let profile;
+let session;
+let playBestKey;
+// Set when the player picks a level themselves, so the coach does not override it.
+let levelPicked = false;
+const songCharts = new Map();
+const songAudio = new Map();
 
 function bestKey() {
   return selectedSong ? `finger-dance-best:${selectedSong.id}:${currentDifficulty()}` : warmupBestKey;
@@ -103,6 +121,35 @@ function setMenusDisabled(disabled) {
   openStrength.disabled = disabled;
   openSongs.disabled = disabled;
 }
+
+// Between games: offer extra practice or a break for a finger that is struggling.
+let askedFinger = null;
+function askAboutFinger(finger) {
+  askedFinger = finger;
+  fingerQuestion.textContent = `It looks like you're struggling with the ${FINGER_NAMES[finger]} finger. Would you like to practice more?`;
+  fingerCheck.hidden = false;
+  startButton.hidden = true;
+  practiceFinger.focus();
+}
+function answerFinger(mode) {
+  chooseFocus(profile, askedFinger, mode);
+  saveCoach(selectedHand, profile);
+  askedFinger = null;
+  fingerCheck.hidden = true;
+  startButton.hidden = false;
+  startButton.focus();
+}
+practiceFinger.addEventListener("click", () => answerFinger("practice"));
+restFinger.addEventListener("click", () => answerFinger("break"));
+function pickLevel(level) {
+  setLevel(level);
+  levelPicked = true;
+  // A level picked by the player becomes the coach's starting point.
+  if (!profile) return;
+  profile.level = level;
+  saveCoach(selectedHand, profile);
+}
+speedSelector.addEventListener("change", () => pickLevel(currentLevel()));
 
 function latestSqueeze() {
   try {
@@ -222,7 +269,8 @@ function scoreTap(zone, ageMs) {
   if (!round) return;
   const index = noteAt(round, tapTime, round.grace);
   if (index < 0) return;
-  const correct = zone === round.notes[index].zone;
+  const note = round.notes[index];
+  const correct = zone === note.zone;
   post("/api/feedback", { zone, correct });
   if (!correct) {
     wrongStreak += 1;
@@ -236,72 +284,190 @@ function scoreTap(zone, ageMs) {
   if (round.hitNotes.has(index)) return;
   round.hitNotes.add(index);
   roundScore.textContent = ++score;
-}
-
-function scheduleTrack(track, start, speed) {
-  const beatLength = track.beatLength / speed;
-  const pattern = makePattern(track.beats);
-  pattern.forEach((zone, index) => {
-    const time = start + index * beatLength;
-    const duration = beatLength * 0.68;
-    const tone = audio.createOscillator();
-    const volume = audio.createGain();
-    tone.frequency.value = track.pitches[zone - 1];
-    volume.gain.setValueAtTime(0.001, time);
-    volume.gain.exponentialRampToValueAtTime(0.13, time + 0.025);
-    volume.gain.exponentialRampToValueAtTime(0.001, time + duration);
-    tone.connect(volume).connect(audio.destination);
-    tone.start(time);
-    tone.stop(time + duration);
-    liveSources.push(tone);
-  });
-  const notes = pattern.map((zone, index) => ({
-    zone,
-    time: start + index * beatLength,
-    end: start + (index + 1) * beatLength,
-  }));
-  return { name: track.name, notes, grace: 0, start, end: start + track.beats * beatLength, hitNotes: new Set() };
-}
-
-function currentDifficulty() {
-  return songDifficulty[speedSelector.querySelector("input:checked").value] ?? "Medium";
-}
-
-async function prepareSong(song, difficulty) {
-  const key = `${song.id}|${difficulty}`;
-  if (!preparedSongs.has(key)) {
-    const loading = (async () => {
-      audio ??= new AudioContext();
-      const [chartResponse, audioResponse] = await Promise.all([
-        fetch(`/api/chart?${new URLSearchParams({ id: song.id, difficulty })}`, { cache: "no-store" }),
-        fetch(song.audio_url),
-      ]);
-      const chart = await chartResponse.json().catch(() => ({}));
-      if (!chartResponse.ok) throw new Error(chart.error ?? "Could not make steps for this song");
-      if (!audioResponse.ok) throw new Error("Could not load the song audio");
-      const buffer = await audio.decodeAudioData(await audioResponse.arrayBuffer())
-        .catch(() => { throw new Error("This browser cannot play that audio format"); });
-      return { notes: chart.notes, buffer };
-    })();
-    preparedSongs.set(key, loading);
-    loading.catch(() => preparedSongs.delete(key));
+  if (!note.judged) {
+    note.judged = true;
+    recordNote(note.zone, true, Math.max(0, tapTime - note.time));
   }
-  return preparedSongs.get(key);
 }
 
-function scheduleSong(song, prepared, start) {
+function recordNote(zone, hit, reaction) {
+  session.record(zone, hit, reaction);
+  // Show the level the coach has moved to on the speed scale.
+  if (session.level !== currentLevel()) setLevel(session.level);
+}
+
+function chartShares(notes) {
+  const counts = [0, 0, 0, 0];
+  notes.forEach(note => { counts[note.zone - 1] += 1; });
+  const total = notes.length || 1;
+  return counts.map(count => count / total);
+}
+
+// A round's source hands out its next note on request, at whatever level the coach
+// is on right then, so difficulty can change in the middle of a round.
+function warmupRound(track, start) {
+  const round = { name: track.name, notes: [], grace: 0, start, end: Infinity, hitNotes: new Set(), pitches: track.pitches };
+  const zones = makePattern(track.beats);
+  let given = 0;
+  let nextTime = start;
+  round.source = {
+    has: () => true,
+    shares: () => [0.25, 0.25, 0.25, 0.25],
+    next(level) {
+      if (given >= zones.length) {
+        round.end = nextTime;
+        return null;
+      }
+      const beat = track.beatLength / levelSpeed(level);
+      const time = given ? nextTime : round.start;
+      nextTime = time + beat;
+      return { zone: zones[given++], time, end: nextTime, beat };
+    },
+  };
+  return round;
+}
+
+function songRound(song, prepared, level, start) {
   const songSource = audio.createBufferSource();
   songSource.buffer = prepared.buffer;
   songSource.connect(audio.destination);
   songSource.start(start);
   liveSources.push(songSource);
-  const notes = prepared.notes.map(note => ({ zone: note.zone, time: start + note.time, end: start + note.end }));
-  const end = Math.max(start + prepared.buffer.duration, (notes.at(-1)?.end ?? start) + 0.5);
-  return { name: song.title, notes, grace: songGrace, start, end, hitNotes: new Set() };
+  const charts = new Map([[level, prepared.notes]]);
+  const shares = new Map();
+  // Neighboring difficulties let the coach step down or up mid-song, but only when
+  // their steps are already made. Asking DDC for new ones would take minutes.
+  for (const neighbor of [level - 1, level + 1]) {
+    if (song.charted?.includes(LEVELS[neighbor])) {
+      loadChart(song, LEVELS[neighbor]).then(notes => charts.set(neighbor, notes)).catch(() => {});
+    }
+  }
+  const lastNote = prepared.notes.at(-1);
+  return {
+    name: song.title,
+    notes: [],
+    grace: songGrace,
+    start,
+    end: Math.max(start + prepared.buffer.duration, start + (lastNote?.end ?? 0) + 0.5),
+    hitNotes: new Set(),
+    source: {
+      has: candidate => charts.has(candidate),
+      shares(candidate) {
+        if (!shares.has(candidate)) shares.set(candidate, chartShares(charts.get(candidate) ?? prepared.notes));
+        return shares.get(candidate);
+      },
+      next(candidate, after) {
+        const notes = charts.get(candidate) ?? prepared.notes;
+        const note = notes.find(item => start + item.time >= after + switchGap);
+        return note ? { zone: note.zone, time: start + note.time, end: start + note.end } : null;
+      },
+    },
+  };
+}
+
+function playTone(round, note) {
+  const duration = note.beat * 0.68;
+  const tone = audio.createOscillator();
+  const volume = audio.createGain();
+  tone.frequency.value = round.pitches[note.zone - 1];
+  volume.gain.setValueAtTime(0.001, note.time);
+  volume.gain.exponentialRampToValueAtTime(0.13, note.time + 0.025);
+  volume.gain.exponentialRampToValueAtTime(0.001, note.time + duration);
+  tone.connect(volume).connect(audio.destination);
+  tone.start(note.time);
+  tone.stop(note.time + duration);
+  liveSources.push(tone);
+}
+
+// Commit the notes about to play: the coach may skip one or move it to another finger.
+function advanceRounds(time) {
+  rounds.forEach((round, index) => {
+    while (!round.done && time + lookahead >= round.start) {
+      round.pending ??= round.source.next(session.level, round.cursor ?? -Infinity);
+      if (!round.pending) {
+        round.done = true;
+        break;
+      }
+      if (round.pending.time > time + lookahead) break;
+      const note = round.pending;
+      round.pending = undefined;
+      round.cursor = note.time;
+      if (session.shouldDrop()) continue;
+      const previous = round.notes.at(-1);
+      if (previous) previous.end = Math.min(previous.end, note.time);
+      note.zone = session.pickZone(note.zone, round.source.shares(session.level), previous?.zone);
+      round.notes.push(note);
+      if (round.pitches) playTone(round, note);
+    }
+    const following = rounds[index + 1];
+    if (round.done && following && !Number.isFinite(following.start)) following.start = round.end + 2;
+  });
+}
+
+function judgeMisses(time) {
+  for (const round of rounds) {
+    round.judged ??= 0;
+    while (round.judged < round.notes.length && time > round.notes[round.judged].end + missDelay) {
+      const note = round.notes[round.judged++];
+      if (note.judged) continue;
+      note.judged = true;
+      recordNote(note.zone, false);
+    }
+  }
+}
+
+function levelSpeed(level) {
+  return Number(levelInputs[level]?.value) || 0.8;
+}
+
+function currentLevel() {
+  return Math.max(0, levelInputs.findIndex(input => input.checked));
+}
+
+function setLevel(level) {
+  levelInputs[level].checked = true;
+}
+
+function currentDifficulty() {
+  return LEVELS[currentLevel()];
+}
+
+function cached(map, key, load) {
+  if (!map.has(key)) {
+    const loading = load();
+    map.set(key, loading);
+    loading.catch(() => map.delete(key));
+  }
+  return map.get(key);
+}
+
+function loadChart(song, difficulty) {
+  return cached(songCharts, `${song.id}|${difficulty}`, async () => {
+    const response = await fetch(`/api/chart?${new URLSearchParams({ id: song.id, difficulty })}`, { cache: "no-store" });
+    const chart = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(chart.error ?? "Could not make steps for this song");
+    return chart.notes;
+  });
+}
+
+function loadAudio(song) {
+  return cached(songAudio, song.id, async () => {
+    audio ??= new AudioContext();
+    const response = await fetch(song.audio_url);
+    if (!response.ok) throw new Error("Could not load the song audio");
+    return audio.decodeAudioData(await response.arrayBuffer())
+      .catch(() => { throw new Error("This browser cannot play that audio format"); });
+  });
+}
+
+async function prepareSong(song, difficulty) {
+  const [notes, buffer] = await Promise.all([loadChart(song, difficulty), loadAudio(song)]);
+  return { notes, buffer };
 }
 
 function finishGame(stopped = false) {
-  const total = rounds.reduce((sum, round) => sum + round.notes.length, 0);
+  const now = audio.currentTime;
+  const total = rounds.reduce((sum, round) => sum + round.notes.filter(note => note.time <= now).length, 0);
   wrongStreak = 0;
   activeRound = undefined;
   rounds = [];
@@ -313,7 +479,7 @@ function finishGame(stopped = false) {
     best = score;
     bestScore.textContent = best;
     try {
-      localStorage.setItem(bestKey(), String(best));
+      localStorage.setItem(playBestKey, String(best));
     } catch {
       // The best score is still displayed for this page.
     }
@@ -325,13 +491,21 @@ function finishGame(stopped = false) {
     roundLabel.textContent = selectedSong ? "Song complete" : "Both songs complete";
     cue.textContent = `You hit ${score} of ${total} beats!`;
   }
+  // Stopping early still teaches the coach: a sore finger is a good reason to stop.
+  const struggling = session?.finish() ?? null;
+  session = undefined;
+  saveCoach(selectedHand, profile);
+  setLevel(profile.level);
+  levelPicked = false;
+  loadBest();
   showFeedback("");
   speedSelector.disabled = false;
   setMenusDisabled(false);
   startButton.textContent = "Play again";
   startButton.hidden = false;
   startButton.disabled = false;
-  if (stopped || zones.includes(document.activeElement)) startButton.focus();
+  if (struggling !== null) askAboutFinger(struggling);
+  else if (stopped || zones.includes(document.activeElement)) startButton.focus();
 }
 
 async function startGame() {
@@ -367,12 +541,14 @@ async function startGame() {
       const prepared = await prepareSong(selectedSong, currentDifficulty()).finally(() => { loadingSong = false; });
       // Stop already reset the game while the steps were loading.
       if (token !== playToken || stopRequested) return;
-      rounds = [scheduleSong(selectedSong, prepared, audio.currentTime + 1)];
+      rounds = [songRound(selectedSong, prepared, currentLevel(), audio.currentTime + 1)];
     } else {
-      const speed = Number(speedSelector.querySelector("input:checked").value);
-      const slow = scheduleTrack(tracks[0], audio.currentTime + 1, speed);
-      rounds = [slow, scheduleTrack(tracks[1], slow.end + 2, speed)];
+      // The fast song's start is set once the slow song's last beat is known.
+      rounds = [warmupRound(tracks[0], audio.currentTime + 1), warmupRound(tracks[1], Infinity)];
     }
+    profile ??= loadCoach(selectedHand);
+    session = new CoachSession(profile, currentLevel(), level => (activeRound ?? rounds[0])?.source.has(level) ?? false);
+    playBestKey = bestKey();
     loadBest();
 
     score = 0;
@@ -389,6 +565,8 @@ async function startGame() {
         finishGame(true);
         return;
       }
+      advanceRounds(time);
+      judgeMisses(time);
       const end = rounds.at(-1).end;
       if (time >= end) {
         // Give the last beat's queued taps time to reach the browser.
@@ -520,6 +698,11 @@ handOptions.forEach(button => button.addEventListener("click", () => {
     handImages.forEach(({ image, original }) => {
       image.src = hand === "left" ? image.dataset.mirroredSrc : original;
     });
+    profile = loadCoach(hand);
+    // Each hand starts where its coach left off, unless the player just picked a level.
+    if (levelPicked) profile.level = currentLevel();
+    else setLevel(profile.level);
+    loadBest();
   }
   handPicker.hidden = true;
   squeeze.hidden = false;
@@ -668,8 +851,33 @@ function songItem(song) {
   const selected = (selectedSong?.id ?? null) === (song?.id ?? null);
   play.textContent = selected ? "Selected" : "Play this song";
   play.setAttribute("aria-pressed", selected);
-  play.addEventListener("click", () => chooseSong(song, play));
-  item.append(details, play);
+  const controls = document.createElement("div");
+  controls.className = "song-controls";
+  // Starter songs (and the warm-up) let the player pick the difficulty right here.
+  let level;
+  if (!song || song.starter) {
+    level = document.createElement("select");
+    level.className = "song-level";
+    level.setAttribute("aria-label", `Difficulty for ${song ? song.title : "Warm-Up"}`);
+    levelNames.forEach((name, index) => {
+      const option = document.createElement("option");
+      option.value = index;
+      option.textContent = name;
+      level.append(option);
+    });
+    level.value = currentLevel();
+    level.addEventListener("change", () => {
+      pickLevel(Number(level.value));
+      songLibrary.querySelectorAll(".song-level").forEach(other => { other.value = level.value; });
+    });
+    controls.append(level);
+  }
+  play.addEventListener("click", () => {
+    if (level) pickLevel(Number(level.value));
+    chooseSong(song, play);
+  });
+  controls.append(play);
+  item.append(details, controls);
   return item;
 }
 
@@ -716,7 +924,7 @@ async function chooseSong(song, button) {
     return;
   }
   const difficulty = currentDifficulty();
-  songLibrary.querySelectorAll("button").forEach(control => { control.disabled = true; });
+  songLibrary.querySelectorAll("button, select").forEach(control => { control.disabled = true; });
   songStatus.textContent = `Making ${difficulty} finger steps for ${song.title}. A new song can take a minute or two…`;
   try {
     await prepareSong(song, difficulty);
@@ -728,7 +936,7 @@ async function chooseSong(song, button) {
     songStatus.textContent = error.message;
     button.focus();
   } finally {
-    songLibrary.querySelectorAll("button").forEach(control => { control.disabled = false; });
+    songLibrary.querySelectorAll("button, select").forEach(control => { control.disabled = false; });
     refreshSongs();
   }
 }

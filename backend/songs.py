@@ -16,10 +16,10 @@ import zipfile
 SONGS = Path(__file__).resolve().parents[1] / "frontend" / "songs"
 UPLOADS = SONGS / "uploads"
 AUDIO_TYPES = (".mp3", ".ogg", ".wav", ".flac", ".m4a")
-DIFFICULTIES = ("Easy", "Medium", "Hard")
+DIFFICULTIES = ("Beginner", "Easy", "Medium", "Hard", "Challenge")
 DDC_URL = os.environ.get("DDC_URL", "http://127.0.0.1:8080")
 # A thumb pinch takes longer than a foot step, so keep notes at least this far apart.
-MIN_GAP = {"Easy": 0.6, "Medium": 0.42, "Hard": 0.3}
+MIN_GAP = {"Beginner": 0.75, "Easy": 0.6, "Medium": 0.42, "Hard": 0.3, "Challenge": 0.24}
 # A chart cue stays lit for at most this long when the next note is far away.
 MAX_CUE = 0.8
 

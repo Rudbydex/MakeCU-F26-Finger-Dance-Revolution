@@ -11,7 +11,7 @@ import songs
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--ddc-url", default=songs.DDC_URL)
 parser.add_argument("--difficulty", action="append", choices=songs.DIFFICULTIES,
-                    help="Repeat to chart several. Defaults to Easy, Medium, and Hard.")
+                    help="Repeat to chart several. Defaults to all five.")
 parser.add_argument("--all", action="store_true", help="Include uploaded songs as well as starters")
 args = parser.parse_args()
 

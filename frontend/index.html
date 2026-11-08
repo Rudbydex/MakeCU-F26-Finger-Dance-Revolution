@@ -6,8 +6,9 @@
   <title>Finger Dance Revolution</title>
   <link rel="preload" as="image" href="assets/octopus-wrong.png">
   <link rel="preload" as="image" href="assets/octopus-wrong-streak.png">
-  <link rel="stylesheet" href="style.css?v=green-strength-bars">
-  <script src="dance.js?v=tap-timing" defer></script>
+  <link rel="stylesheet" href="style.css?v=finger-check">
+  <script src="coach.js?v=finger-check" defer></script>
+  <script src="dance.js?v=finger-check" defer></script>
 </head>
 <body>
   <main>
@@ -35,9 +36,11 @@
         <fieldset id="speed" class="speed">
           <legend>Speed</legend>
           <div class="speed-scale">
+            <label><input type="radio" name="speed" value="0.4">Gentle</label>
             <label><input type="radio" name="speed" value="0.5">Relax</label>
             <label><input type="radio" name="speed" value="0.8" checked>Practice</label>
             <label><input type="radio" name="speed" value="1.3">Hard work</label>
+            <label><input type="radio" name="speed" value="1.6">Challenge</label>
           </div>
         </fieldset>
         <div class="game-center">
@@ -70,6 +73,13 @@
                 <button id="continue-squeeze" type="button">Skip for now</button>
               </div>
             </section>
+            <section id="finger-check" class="finger-check" aria-labelledby="finger-question" hidden>
+              <p id="finger-question"></p>
+              <div class="finger-check-actions">
+                <button id="practice-finger" type="button">Practice more</button>
+                <button id="rest-finger" type="button">Take a break</button>
+              </div>
+            </section>
             <button id="start" type="button">Start game</button>
             <button id="stop" type="button" hidden>Stop</button>
           </div>
@@ -89,8 +99,7 @@
       </section>
       <section id="song-library" class="song-library" aria-labelledby="songs-title" hidden>
         <h2 id="songs-title" tabindex="-1">Songs</h2>
-        <p>Pick a song to play. New songs get finger steps from the Dance Dance Convolution step generator.
-          Your speed choice sets the step difficulty.</p>
+        <p>Pick a song and a difficulty. New songs get finger steps from the Dance Dance Convolution step generator.</p>
         <h3>Starter songs</h3>
         <ul id="starter-songs" class="song-list"></ul>
         <h3>Your songs</h3>
