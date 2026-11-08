@@ -27,13 +27,18 @@ class DanceState:
         with self.lock:
             now = monotonic()
             cue = self.cue if now < self.cue_until else None
-            hardware = self.hardware if now < self.hardware_until else None
+            hardware = None
+            if now < self.hardware_until:
+                hardware = {**self.hardware, "age_ms": round((now - self.hardware_received_at) * 1000)}
             return {"last_tap": self.last_tap, "cue": cue, "hardware": hardware}
 
-    def record_hardware(self, fsr, zone):
+    def record_hardware(self, fsr, zone, pressure_counts=None):
         with self.lock:
             self.hardware = {"fsr": fsr, "zone": zone}
-            self.hardware_until = monotonic() + 2
+            if pressure_counts is not None:
+                self.hardware["pressure_counts"] = pressure_counts
+            self.hardware_received_at = monotonic()
+            self.hardware_until = self.hardware_received_at + 2
 
     def record_tap(self, zone, source):
         with self.lock:
@@ -94,7 +99,15 @@ class Handler(SimpleHTTPRequestHandler):
             if type(fsr) is not int or fsr < 0:
                 self.send_json({"error": "Expected a nonnegative FSR reading"}, HTTPStatus.BAD_REQUEST)
                 return
-            self.state.record_hardware(fsr, zone)
+            pressure_counts = body.get("pressure_counts")
+            if pressure_counts is not None and (
+                not isinstance(pressure_counts, list)
+                or len(pressure_counts) != 4
+                or any(type(count) is not int or count < 0 for count in pressure_counts)
+            ):
+                self.send_json({"error": "Expected four nonnegative finger pressure counts"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.state.record_hardware(fsr, zone, pressure_counts)
             self.send_json({"ok": True})
             return
 

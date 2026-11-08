@@ -6,9 +6,13 @@ From this folder, run:
 python3 backend/server.py
 ```
 
-Open http://127.0.0.1:8000 and click **Start game**. The tutorial shows
-the highlighted index finger and the matching thumb pinch. Select **Index**
-to begin the 12-beat slow song, followed by the 16-beat fast song.
+Open http://127.0.0.1:8000 and click **Start game**. Choose a hand, then
+complete or skip the squeeze check. The tutorial shows the highlighted index
+finger and the matching thumb pinch. Select **Index** to begin the 12-beat slow
+song, followed by the 16-beat fast song.
+
+**See your strength record!** shows the most recent squeeze saved in this
+browser. Earlier rows and the example conclusion are generated for the demo.
 
 Choose **Relax** (0.5×), **Practise** (0.8×, the default), or **Hard work** (1.3×)
 before the songs start. Both rounds use synthesized notes and a newly shuffled
@@ -44,6 +48,12 @@ release or a change of finger before sending another.
 
 The game displays **Sensor connected** while it receives live Arduino readings.
 The status also shows the raw thumb pressure and the finger currently detected.
+
+The current Arduino bridge sends the shared thumb pressure. The squeeze check
+saves this as a thumb-only reading. A bridge with individual finger pressure
+sensors can send `pressure_counts` with four counts in index, middle, ring,
+little order to `POST /api/hardware`. The squeeze check discards one lowest
+count and averages the other three.
 
 Run the bridge on the same computer as the server. Have it map the board's sensor
 events to zones 1–4 and send one request per tap:

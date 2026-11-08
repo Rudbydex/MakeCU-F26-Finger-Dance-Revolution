@@ -1,5 +1,23 @@
 const zones = [...document.querySelectorAll(".zone")];
 const hands = [...document.querySelectorAll(".hand")];
+const game = document.getElementById("game");
+const strengthRecord = document.getElementById("strength-record");
+const openStrength = document.getElementById("open-strength");
+const returnGame = document.getElementById("return-game");
+const latestStrengthLabel = document.getElementById("latest-strength-label");
+const latestStrength = document.getElementById("latest-strength");
+const exampleStrengths = strengthRecord.querySelectorAll("[data-strength-factor]");
+const strengthMeters = [...strengthRecord.querySelectorAll("meter")];
+const handPicker = document.getElementById("hand-picker");
+const handOptions = [...handPicker.querySelectorAll("button")];
+const handImages = [...document.querySelectorAll("[data-mirrored-src]")].map(image => ({
+  image,
+  original: image.getAttribute("src"),
+}));
+const squeeze = document.getElementById("squeeze");
+const measureSqueeze = document.getElementById("measure-squeeze");
+const continueSqueeze = document.getElementById("continue-squeeze");
+const squeezeStatus = document.getElementById("squeeze-status");
 const tutorial = document.getElementById("tutorial");
 const speedSelector = document.getElementById("speed");
 const startButton = document.getElementById("start");
@@ -22,15 +40,21 @@ const tracks = [
 ];
 const maxScore = tracks.reduce((sum, track) => sum + track.beats, 0);
 const bestKey = "finger-dance-two-round-best";
+const strengthKey = "finger-dance-squeeze-";
+const demoStrengths = Array.from(exampleStrengths, () => 50 + Math.floor(Math.random() * 101));
+const formatStrength = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 
 let audio;
 let tutorialComplete = false;
+let selectedHand;
 let activeRound;
 let activeZone = 0;
 let cueSentAt = 0;
 let activeBeat = -1;
 let lastTapId = 0;
 let hardwareStateSeen = false;
+let latestHardware;
+let hardwareReceivedAt = 0;
 let score = 0;
 let wrongStreak = 0;
 let best = 0;
@@ -43,6 +67,53 @@ try {
   // Scores still work for the current page when local storage is unavailable.
 }
 bestScore.textContent = best;
+
+function latestSqueeze() {
+  try {
+    return ["left", "right"]
+      .map(hand => JSON.parse(localStorage.getItem(strengthKey + hand) ?? "null"))
+      .filter(record => record && Number.isFinite(Date.parse(record.measuredAt))
+        && (Number.isFinite(record.fingerPressureAverage) || Number.isFinite(record.thumbPressure)))
+      .sort((first, second) => Date.parse(second.measuredAt) - Date.parse(first.measuredAt))[0];
+  } catch {
+    return undefined;
+  }
+}
+
+openStrength.addEventListener("click", () => {
+  const record = latestSqueeze();
+  const hasFingerAverage = Number.isFinite(record?.fingerPressureAverage);
+  const reference = hasFingerAverage ? record.fingerPressureAverage : record?.thumbPressure;
+  const examples = Array.from(exampleStrengths, (row, index) =>
+    record ? reference * Number(row.dataset.strengthFactor) : demoStrengths[index]
+  );
+  exampleStrengths.forEach((row, index) => {
+    row.textContent = `${formatStrength.format(examples[index])} counts`;
+  });
+  const values = [...examples, reference ?? 0];
+  const largest = Math.max(0, ...values);
+  const scaleMax = largest > 0 ? largest / 0.7 : 1;
+  strengthMeters.forEach((meter, index) => {
+    meter.max = scaleMax;
+    meter.value = values[index];
+  });
+  const date = record ? new Date(record.measuredAt) : null;
+  const isToday = date?.toDateString() === new Date().toDateString();
+  latestStrengthLabel.textContent = !date || isToday ? "Today" : `Latest · ${date.toLocaleDateString()}`;
+  const readingType = hasFingerAverage ? "finger average" : "thumb only";
+  latestStrength.textContent = record
+    ? `${formatStrength.format(reference)} counts (${readingType}, ${record.hand} hand)`
+    : "No squeeze recorded yet";
+  game.hidden = true;
+  strengthRecord.hidden = false;
+  document.getElementById("strength-title").focus();
+});
+
+returnGame.addEventListener("click", () => {
+  strengthRecord.hidden = true;
+  game.hidden = false;
+  openStrength.focus();
+});
 
 function makePattern(length) {
   const pattern = [];
@@ -146,6 +217,7 @@ function finishGame() {
   cue.textContent = `You hit ${score} of ${maxScore} beats!`;
   showFeedback("");
   speedSelector.disabled = false;
+  openStrength.disabled = false;
   startButton.textContent = "Play again";
   startButton.hidden = false;
   startButton.disabled = false;
@@ -155,6 +227,7 @@ function finishGame() {
 async function startGame() {
   if (!tutorial.hidden || startButton.disabled) return;
   startButton.disabled = true;
+  openStrength.disabled = true;
   try {
     audio ??= new AudioContext();
     if (audio.state !== "running") await audio.resume();
@@ -162,7 +235,9 @@ async function startGame() {
       tutorial.hidden = false;
       startButton.hidden = true;
       roundLabel.textContent = "Tutorial";
-      cue.textContent = "When a finger lights up, touch it to your thumb. Try the green index finger.";
+      openStrength.disabled = false;
+      cue.textContent = "";
+      cue.hidden = true;
       showFeedback("");
       zones[0].focus();
       return;
@@ -176,6 +251,7 @@ async function startGame() {
     wrongStreak = 0;
     roundScore.textContent = score;
     roundLabel.textContent = slow.name;
+    cue.hidden = false;
     cue.textContent = "Get ready";
     showFeedback("");
     startButton.hidden = true;
@@ -212,8 +288,10 @@ async function startGame() {
     }
     requestAnimationFrame(update);
   } catch {
+    cue.hidden = false;
     cue.textContent = "Audio could not start";
     speedSelector.disabled = false;
+    openStrength.disabled = false;
     startButton.textContent = "Try again";
     startButton.hidden = false;
     startButton.disabled = false;
@@ -221,6 +299,7 @@ async function startGame() {
 }
 
 function handleTap(zone) {
+  if (game.hidden) return;
   if (tutorial.hidden) {
     scoreTap(zone);
     return;
@@ -241,6 +320,8 @@ function sendTap(zone) {
 }
 
 function showHardwareStatus(hardware) {
+  latestHardware = hardware;
+  hardwareReceivedAt = performance.now();
   const connected = Boolean(hardware);
   const label = connected ? "Sensor connected" : "Waiting for sensor";
   if (sensorConnection.textContent !== label) sensorConnection.textContent = label;
@@ -278,10 +359,81 @@ async function readHardware() {
   }
 }
 
-startButton.addEventListener("click", startGame);
+startButton.addEventListener("click", () => {
+  startButton.hidden = true;
+  handPicker.hidden = false;
+  cue.textContent = "Choose the hand you will use";
+  (handOptions.find(button => button.dataset.hand === selectedHand) ?? handOptions[0]).focus();
+});
+handOptions.forEach(button => button.addEventListener("click", () => {
+  const hand = button.dataset.hand;
+  if (hand !== selectedHand) {
+    tutorialComplete = false;
+    selectedHand = hand;
+    handImages.forEach(({ image, original }) => {
+      image.src = hand === "left" ? image.dataset.mirroredSrc : original;
+    });
+  }
+  handPicker.hidden = true;
+  squeeze.hidden = false;
+  roundLabel.textContent = "Squeeze check";
+  cue.hidden = true;
+  squeezeStatus.textContent = "";
+  measureSqueeze.hidden = false;
+  continueSqueeze.textContent = "Skip for now";
+  measureSqueeze.focus();
+}));
+
+measureSqueeze.addEventListener("click", () => {
+  measureSqueeze.disabled = true;
+  continueSqueeze.disabled = true;
+  openStrength.disabled = true;
+  squeezeStatus.textContent = "Get ready";
+  setTimeout(() => { squeezeStatus.textContent = "Squeeze and hold"; }, 400);
+  setTimeout(() => {
+    measureSqueeze.disabled = false;
+    continueSqueeze.disabled = false;
+    openStrength.disabled = false;
+    const sampleAge = latestHardware?.age_ms + performance.now() - hardwareReceivedAt;
+    if (!(sampleAge >= 0 && sampleAge <= 850)) {
+      squeezeStatus.textContent = "No fresh sensor reading. Check the connection and try again.";
+      measureSqueeze.focus();
+      return;
+    }
+
+    const counts = latestHardware.pressure_counts ?? null;
+    const average = counts
+      ? (counts.reduce((sum, count) => sum + count, 0) - Math.min(...counts)) / 3
+      : null;
+    const measurement = {
+      hand: selectedHand,
+      thumbPressure: latestHardware.fsr,
+      fingerPressureCounts: counts,
+      fingerPressureAverage: average,
+      measuredAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(strengthKey + selectedHand, JSON.stringify(measurement));
+    } catch {
+      squeezeStatus.textContent = "This browser could not save the reading. Try again or skip.";
+      measureSqueeze.focus();
+      return;
+    }
+    squeezeStatus.textContent = average === null
+      ? `Thumb reading saved: ${measurement.thumbPressure}. Individual finger pressure unavailable.`
+      : `Finger pressure average saved: ${average.toFixed(1)}.`;
+    measureSqueeze.hidden = true;
+    continueSqueeze.textContent = "Continue";
+    continueSqueeze.focus();
+  }, 2400);
+});
+continueSqueeze.addEventListener("click", () => {
+  squeeze.hidden = true;
+  startGame();
+});
 zones.forEach(button => button.addEventListener("click", () => sendTap(Number(button.dataset.zone))));
 window.addEventListener("keydown", event => {
-  if (speedSelector.contains(event.target) || (tutorial.hidden && !startButton.disabled)) return;
+  if (game.hidden || speedSelector.contains(event.target) || (tutorial.hidden && !startButton.disabled)) return;
   const arrow = arrowKeys.indexOf(event.key);
   if (arrow >= 0) {
     event.preventDefault();
