@@ -2,6 +2,7 @@
 
 ```
 docker run --rm --platform linux/amd64 -p 8080:80 chrisdonahue/ddc:latest
+.venv/bin/python backend/serial_bridge.py auto
 ```
 
 ```
