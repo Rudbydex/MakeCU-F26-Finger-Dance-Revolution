@@ -138,6 +138,14 @@ class CoachSession {
     return zone;
   }
 
+  // The player picked a new speed while paused: judge from there, without easing.
+  setLevel(level) {
+    this.level = level;
+    this.startLevel = level;
+    this.ease = 0;
+    this.sinceChange = [];
+  }
+
   // While eased, skip every third (or every second) note. Never two in a row.
   shouldDrop() {
     if (!this.ease) return false;

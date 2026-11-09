@@ -26,13 +26,17 @@ browser. Earlier rows and the example conclusion are generated for the demo.
 Choose **Gentle** (0.4×), **Relax** (0.5×), **Practice** (0.8×, the default), **Hard work** (1.3×), or **Challenge** (1.6×)
 before the songs start. Both rounds use synthesized notes and a newly shuffled
 pattern each run. Click a finger button or use the arrow keys or numbers 1-4.
+Press **Pause** to freeze the song. While paused you can change the speed, then
+**Resume** where you left off or **Restart** the song from the beginning.
 
-| Hardware zone | Direction | Finger | Image |
+| Hardware zone | Finger | Key | Image |
 | --- | --- | --- | --- |
-| 1 | Left | Index | `left.png` |
-| 2 | Down | Middle | `down.png` |
-| 3 | Up | Ring | `up.png` |
-| 4 | Right | Little | `right.png` |
+| 1 | Index | Left arrow or 1 | `left.png` |
+| 2 | Middle | Down arrow or 2 | `down.png` |
+| 3 | Ring | Up arrow or 3 | `up.png` |
+| 4 | Little | Right arrow or 4 | `right.png` |
+
+Each song starts 3 seconds before its first step, skipping any long intro.
 
 - `frontend/` contains the plain HTML, CSS, JavaScript, octopus and hand artwork.
 - `backend/` serves the page and exchanges JSON with a hardware bridge.
@@ -52,8 +56,8 @@ the browser. It does this quietly, without on-screen messages.
 - The level you finish on, adjusted by how the end went, becomes the next
   play's starting level.
 
-Picking a difficulty yourself, on the speed scale or next to a starter song,
-always wins for that play.
+Picking a speed yourself on the speed scale wins for that play: the coach can
+still ease off, but never goes faster than the speed you picked.
 
 **Fingers.** After a play, the game checks each finger. A finger is struggling
 if it hits under 75% and at least 20 points below the others. It is also
@@ -124,13 +128,14 @@ Upload the Finger Dance Revolution controller sketch to the Arduino. Start the
 game server, then run these commands in a second terminal from the project folder:
 
 ```sh
-python3 -m pip install pyserial
-python3 backend/serial_bridge.py auto
+python3 -m venv .venv                 # first time only
+.venv/bin/pip install pyserial        # first time only
+.venv/bin/python backend/serial_bridge.py auto
 ```
 
 `auto` finds the Arduino by its USB ID. If several boards are connected, run
 `python3 -m serial.tools.list_ports` and pass the port instead, for example
-`/dev/cu.usbmodem1234`. The controller firmware is `backend/new_elec.ino`. Close Arduino Serial Monitor
+`/dev/cu.usbmodem1234`. The controller firmware is `backend/code.ino`. Close Arduino Serial Monitor
 before opening the bridge. Keep your thumb off the FSR during board startup so
 it can calibrate. If the game server uses a different port, pass its URL to the
 bridge with `--server`, for example `--server http://127.0.0.1:8002`.

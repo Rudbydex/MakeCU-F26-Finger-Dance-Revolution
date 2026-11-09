@@ -19,9 +19,10 @@ AUDIO_TYPES = (".mp3", ".ogg", ".wav", ".flac", ".m4a")
 DIFFICULTIES = ("Beginner", "Easy", "Medium", "Hard", "Challenge")
 DDC_URL = os.environ.get("DDC_URL", "http://127.0.0.1:8080")
 # A thumb pinch takes longer than a foot step, so keep notes at least this far apart.
-MIN_GAP = {"Beginner": 0.75, "Easy": 0.6, "Medium": 0.42, "Hard": 0.3, "Challenge": 0.24}
+MIN_GAP = {"Beginner": 1.2, "Easy": 0.6, "Medium": 0.42, "Hard": 0.3, "Challenge": 0.24}
 # A chart cue stays lit for at most this long when the next note is far away.
-MAX_CUE = 0.8
+# Slower levels keep each hand on screen longer.
+MAX_CUE = {"Beginner": 1.8, "Easy": 1.3, "Medium": 0.8, "Hard": 0.8, "Challenge": 0.8}
 
 chart_lock = Lock()
 
@@ -201,10 +202,11 @@ def finger_notes(steps, difficulty):
             # On a jump, prefer a finger that differs from the previous pinch.
             zone = next((c + 1 for c in columns if c + 1 != picked[-1][1]), zone)
         picked.append((time, zone))
+    cue = MAX_CUE.get(difficulty, 0.8)
     notes = []
     for index, (time, zone) in enumerate(picked):
-        following = picked[index + 1][0] if index + 1 < len(picked) else time + MAX_CUE
-        notes.append({"time": round(time, 3), "zone": zone, "end": round(min(following, time + MAX_CUE), 3)})
+        following = picked[index + 1][0] if index + 1 < len(picked) else time + cue
+        notes.append({"time": round(time, 3), "zone": zone, "end": round(min(following, time + cue), 3)})
     return notes
 
 

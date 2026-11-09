@@ -200,7 +200,7 @@ def forward_contacts(board, server_url, debug=False):
 
             if FINGERTIP_ONLY_SAMPLE.fullmatch(line) and not warned_fingertip_only:
                 print("Arduino is sending touch readings without the FSR value. "
-                      "Upload the current controller sketch (backend/new_elec.ino).",
+                      "Upload the current controller sketch (backend/code.ino).",
                       file=sys.stderr, flush=True)
                 warned_fingertip_only = True
                 continue

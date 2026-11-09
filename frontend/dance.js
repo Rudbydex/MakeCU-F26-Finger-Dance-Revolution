@@ -21,7 +21,9 @@ const squeezeStatus = document.getElementById("squeeze-status");
 const tutorial = document.getElementById("tutorial");
 const speedSelector = document.getElementById("speed");
 const startButton = document.getElementById("start");
-const stopButton = document.getElementById("stop");
+const pauseButton = document.getElementById("pause");
+const resumeButton = document.getElementById("resume");
+const restartButton = document.getElementById("restart");
 const roundLabel = document.getElementById("round-label");
 const roundScore = document.getElementById("round-score");
 const bestScore = document.getElementById("best-score");
@@ -48,7 +50,9 @@ const defaultMascot = mascot.getAttribute("src");
 const tutorialZone = 1;
 const squeezeRise = 12;
 const squeezeWindowMs = 1000;
-const directions = ["Left", "Down", "Up", "Right"];
+const fingerNames = ["Index", "Middle", "Ring", "Little"];
+// Songs skip any long intro and start this many seconds before the first step.
+const introSeconds = 3;
 const arrowKeys = ["ArrowLeft", "ArrowDown", "ArrowUp", "ArrowRight"];
 const tracks = [
   { name: "Slow song", beatLength: 0.72, beats: 12, pitches: [261.63, 329.63, 392, 440] },
@@ -59,7 +63,6 @@ const starterSlots = 3;
 // The speed radios, in order, are the coach's levels (LEVELS in coach.js). Each one
 // sets the warm-up tempo from its value and asks DDC for the matching difficulty.
 const levelInputs = [...speedSelector.querySelectorAll("input")];
-const levelNames = levelInputs.map(input => input.parentElement.textContent.trim());
 const songGrace = 0.12;
 // Notes are committed this far ahead so the coach can still shape upcoming steps.
 const lookahead = 0.2;
@@ -76,7 +79,9 @@ let tutorialComplete = false;
 let selectedHand;
 let selectedSong = null;
 let liveSources = [];
-let stopRequested = false;
+let paused = false;
+// The fastest level the coach may move to this play (the picked speed, when there is one).
+let maxLevel = 0;
 let loadingSong = false;
 let playToken = 0;
 let activeRound;
@@ -164,6 +169,8 @@ function latestSqueeze() {
 }
 
 openStrength.addEventListener("click", () => {
+  // Leaving a paused game ends it.
+  if (paused) finishGame(true);
   const record = latestSqueeze();
   const hasFingerAverage = Number.isFinite(record?.fingerPressureAverage);
   const reference = hasFingerAverage ? record.fingerPressureAverage : record?.thumbPressure;
@@ -243,9 +250,10 @@ function publishCue() {
   post("/api/cue", { zone });
 }
 
-function showFeedback(message, wrongTap = false) {
+function showFeedback(message, wrongTap = false, goodTap = false) {
   clearTimeout(feedbackTimeout);
   feedback.textContent = message;
+  feedback.dataset.tone = goodTap ? "good" : "";
   let image = defaultMascot;
   if (!tutorial.hidden || wrongStreak >= 4) image = "assets/octopus-wrong-streak.png";
   else if (wrongTap) image = "assets/octopus-wrong.png";
@@ -279,7 +287,7 @@ function scoreTap(zone, ageMs) {
     return;
   }
   wrongStreak = 0;
-  showFeedback("On beat!");
+  showFeedback("On beat!", false, true);
   feedbackTimeout = setTimeout(() => showFeedback(""), 350);
   if (round.hitNotes.has(index)) return;
   round.hitNotes.add(index);
@@ -312,6 +320,7 @@ function warmupRound(track, start) {
   let nextTime = start;
   round.source = {
     has: () => true,
+    load: async () => {},
     shares: () => [0.25, 0.25, 0.25, 0.25],
     next(level) {
       if (given >= zones.length) {
@@ -328,10 +337,15 @@ function warmupRound(track, start) {
 }
 
 function songRound(song, prepared, level, start) {
+  // Skip a long intro: begin the audio introSeconds before the chart's first step.
+  // Steps in the first introSeconds are dropped so there is always time to get ready.
+  const offset = Math.max(0, (prepared.notes[0]?.time ?? 0) - introSeconds);
+  const songStart = start - offset;
+  const firstStep = start + introSeconds - 0.001;
   const songSource = audio.createBufferSource();
   songSource.buffer = prepared.buffer;
   songSource.connect(audio.destination);
-  songSource.start(start);
+  songSource.start(start, offset);
   liveSources.push(songSource);
   const charts = new Map([[level, prepared.notes]]);
   const shares = new Map();
@@ -348,7 +362,7 @@ function songRound(song, prepared, level, start) {
     notes: [],
     grace: songGrace,
     start,
-    end: Math.max(start + prepared.buffer.duration, start + (lastNote?.end ?? 0) + 0.5),
+    end: Math.max(songStart + prepared.buffer.duration, songStart + (lastNote?.end ?? 0) + 0.5),
     hitNotes: new Set(),
     source: {
       has: candidate => charts.has(candidate),
@@ -356,10 +370,14 @@ function songRound(song, prepared, level, start) {
         if (!shares.has(candidate)) shares.set(candidate, chartShares(charts.get(candidate) ?? prepared.notes));
         return shares.get(candidate);
       },
+      async load(candidate) {
+        if (!charts.has(candidate)) charts.set(candidate, await loadChart(song, LEVELS[candidate]));
+      },
       next(candidate, after) {
         const notes = charts.get(candidate) ?? prepared.notes;
-        const note = notes.find(item => start + item.time >= after + switchGap);
-        return note ? { zone: note.zone, time: start + note.time, end: start + note.end } : null;
+        const earliest = Math.max(after + switchGap, firstStep);
+        const note = notes.find(item => songStart + item.time >= earliest);
+        return note ? { zone: note.zone, time: songStart + note.time, end: songStart + note.end } : null;
       },
     },
   };
@@ -465,16 +483,25 @@ async function prepareSong(song, difficulty) {
   return { notes, buffer };
 }
 
-function finishGame(stopped = false) {
-  const now = audio.currentTime;
-  const total = rounds.reduce((sum, round) => sum + round.notes.filter(note => note.time <= now).length, 0);
-  wrongStreak = 0;
+// Silence everything and end the current update loop.
+function stopPlayback() {
+  playToken += 1;
+  paused = false;
   activeRound = undefined;
   rounds = [];
   liveSources.forEach(source => source.stop());
   liveSources = [];
-  stopButton.hidden = true;
+  pauseButton.hidden = true;
+  resumeButton.hidden = true;
+  restartButton.hidden = true;
   showZone(0);
+}
+
+function finishGame(stopped = false) {
+  const now = audio.currentTime;
+  const total = rounds.reduce((sum, round) => sum + round.notes.filter(note => note.time <= now).length, 0);
+  wrongStreak = 0;
+  stopPlayback();
   if (!stopped && score > best) {
     best = score;
     bestScore.textContent = best;
@@ -530,24 +557,29 @@ async function startGame() {
     }
     speedSelector.disabled = true;
     startButton.hidden = true;
-    stopRequested = false;
     token = ++playToken;
-    stopButton.hidden = false;
     cue.hidden = false;
     if (selectedSong) {
       roundLabel.textContent = selectedSong.title;
       cue.textContent = "Making finger steps…";
+      // While steps load, the Pause button cancels instead.
+      pauseButton.textContent = "Cancel";
+      pauseButton.hidden = false;
       loadingSong = true;
       const prepared = await prepareSong(selectedSong, currentDifficulty()).finally(() => { loadingSong = false; });
-      // Stop already reset the game while the steps were loading.
-      if (token !== playToken || stopRequested) return;
+      // Cancel or Restart already reset the game while the steps were loading.
+      if (token !== playToken) return;
       rounds = [songRound(selectedSong, prepared, currentLevel(), audio.currentTime + 1)];
     } else {
       // The fast song's start is set once the slow song's last beat is known.
       rounds = [warmupRound(tracks[0], audio.currentTime + 1), warmupRound(tracks[1], Infinity)];
     }
     profile ??= loadCoach(selectedHand);
-    session = new CoachSession(profile, currentLevel(), level => (activeRound ?? rounds[0])?.source.has(level) ?? false);
+    // A level the player picked is a ceiling for this play: the coach may ease off
+    // but never speeds up past it (so Gentle stays gentle).
+    maxLevel = levelPicked ? currentLevel() : LEVELS.length - 1;
+    session = new CoachSession(profile, currentLevel(),
+      level => level <= maxLevel && ((activeRound ?? rounds[0])?.source.has(level) ?? false));
     playBestKey = bestKey();
     loadBest();
 
@@ -557,20 +589,25 @@ async function startGame() {
     roundLabel.textContent = rounds[0].name;
     cue.textContent = "Get ready";
     showFeedback("");
+    pauseButton.textContent = "Pause";
+    pauseButton.hidden = false;
     zones[0].focus();
 
     function update() {
-      const time = audio.currentTime;
-      if (stopRequested) {
-        finishGame(true);
+      // A restart or a new game has taken over.
+      if (token !== playToken) return;
+      if (paused) {
+        requestAnimationFrame(update);
         return;
       }
+      const time = audio.currentTime;
       advanceRounds(time);
       judgeMisses(time);
       const end = rounds.at(-1).end;
       if (time >= end) {
         // Give the last beat's queued taps time to reach the browser.
         showZone(0);
+        cue.textContent = "";
         if (time >= end + 0.15) finishGame();
         else requestAnimationFrame(update);
         return;
@@ -590,21 +627,23 @@ async function startGame() {
         activeNote = index;
         if (index >= 0) {
           const zone = round.notes[index].zone;
-          cue.textContent = `Tap ${directions[zone - 1]}!`;
+          cue.textContent = `Tap ${fingerNames[zone - 1]}!`;
           showZone(zone);
         } else {
+          // The finger name only shows while its hand picture does.
           showZone(0);
+          cue.textContent = "";
         }
       }
       requestAnimationFrame(update);
     }
     requestAnimationFrame(update);
   } catch (error) {
-    // A load that failed after Stop was pressed has nothing left to report.
-    if (stopRequested || (token && token !== playToken)) return;
+    // A load that failed after Cancel or Restart has nothing left to report.
+    if (token && token !== playToken) return;
     cue.hidden = false;
     cue.textContent = error instanceof Error && error.message ? error.message : "Audio could not start";
-    stopButton.hidden = true;
+    pauseButton.hidden = true;
     speedSelector.disabled = false;
     setMenusDisabled(false);
     startButton.textContent = "Try again";
@@ -614,7 +653,7 @@ async function startGame() {
 }
 
 function handleTap(zone, ageMs = 0) {
-  if (game.hidden) return;
+  if (game.hidden || paused) return;
   if (tutorial.hidden) {
     scoreTap(zone, ageMs);
     return;
@@ -813,11 +852,84 @@ measureSqueeze.addEventListener("click", () => {
     timeout: setTimeout(finishSqueeze, 5000),
   };
 });
-stopButton.addEventListener("click", () => {
-  stopRequested = true;
-  // While steps load there is no update loop to notice the request, so stop now.
-  if (loadingSong) finishGame(true);
+// Pausing suspends the audio clock, so the song, tones and every step wait in place.
+async function pauseGame() {
+  if (paused || !session) return;
+  paused = true;
+  await audio.suspend();
+  showZone(0);
+  activeNote = -1;
+  cue.textContent = "Paused";
+  showFeedback("");
+  pauseButton.hidden = true;
+  resumeButton.hidden = false;
+  restartButton.hidden = false;
+  speedSelector.disabled = false;
+  setMenusDisabled(false);
+  resumeButton.focus();
+}
+
+// Resume where the song left off, at the speed now selected.
+async function resumeGame() {
+  if (!paused) return;
+  const level = currentLevel();
+  resumeButton.disabled = true;
+  restartButton.disabled = true;
+  speedSelector.disabled = true;
+  setMenusDisabled(true);
+  try {
+    if (level !== session.level) {
+      cue.textContent = "Making finger steps…";
+      await Promise.all(rounds.map(round => round.source.load(level)));
+      session.setLevel(level);
+      // Song steps after this point come from the new speed's chart.
+      rounds.forEach(round => { if (!round.pitches) round.pending = undefined; });
+    }
+  } catch (error) {
+    cue.textContent = error instanceof Error && error.message ? error.message : "Could not make steps for that speed";
+    speedSelector.disabled = false;
+    setMenusDisabled(false);
+    return;
+  } finally {
+    resumeButton.disabled = false;
+    restartButton.disabled = false;
+  }
+  maxLevel = levelPicked ? level : LEVELS.length - 1;
+  paused = false;
+  activeNote = -1;
+  cue.textContent = "";
+  resumeButton.hidden = true;
+  restartButton.hidden = true;
+  pauseButton.hidden = false;
+  zones[0].focus();
+  await audio.resume();
+}
+
+// Start the current song again from the beginning. The abandoned try is not scored.
+function restartGame() {
+  stopPlayback();
+  session = undefined;
+  startButton.disabled = false;
+  startGame();
+}
+
+pauseButton.addEventListener("click", () => {
+  if (!loadingSong) {
+    pauseGame();
+    return;
+  }
+  // Cancel making steps and go back to the start screen.
+  stopPlayback();
+  speedSelector.disabled = false;
+  setMenusDisabled(false);
+  cue.textContent = "Ready to play";
+  startButton.textContent = "Start game";
+  startButton.hidden = false;
+  startButton.disabled = false;
+  startButton.focus();
 });
+resumeButton.addEventListener("click", resumeGame);
+restartButton.addEventListener("click", restartGame);
 continueSqueeze.addEventListener("click", () => {
   squeeze.hidden = true;
   startGame();
@@ -853,29 +965,7 @@ function songItem(song) {
   play.setAttribute("aria-pressed", selected);
   const controls = document.createElement("div");
   controls.className = "song-controls";
-  // Starter songs (and the warm-up) let the player pick the difficulty right here.
-  let level;
-  if (!song || song.starter) {
-    level = document.createElement("select");
-    level.className = "song-level";
-    level.setAttribute("aria-label", `Difficulty for ${song ? song.title : "Warm-Up"}`);
-    levelNames.forEach((name, index) => {
-      const option = document.createElement("option");
-      option.value = index;
-      option.textContent = name;
-      level.append(option);
-    });
-    level.value = currentLevel();
-    level.addEventListener("change", () => {
-      pickLevel(Number(level.value));
-      songLibrary.querySelectorAll(".song-level").forEach(other => { other.value = level.value; });
-    });
-    controls.append(level);
-  }
-  play.addEventListener("click", () => {
-    if (level) pickLevel(Number(level.value));
-    chooseSong(song, play);
-  });
+  play.addEventListener("click", () => chooseSong(song, play));
   controls.append(play);
   item.append(details, controls);
   return item;
@@ -948,6 +1038,7 @@ function closeSongs() {
 }
 
 openSongs.addEventListener("click", () => {
+  if (paused) finishGame(true);
   game.hidden = true;
   strengthRecord.hidden = true;
   songLibrary.hidden = false;
